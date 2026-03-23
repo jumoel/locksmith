@@ -249,6 +249,10 @@ func (r *resolver) resolveDep(graph *ecosystem.Graph, name, constraint string, d
 
 // computePlacement takes the logical graph and determines where each package
 // lives in the node_modules hierarchy (hoisting/dedup).
+//
+// Root dependencies are placed first to ensure they get the root-level slot.
+// Then transitive dependencies are placed with hoisting, nesting when conflicts
+// arise with already-placed root deps.
 func (r *resolver) computePlacement(graph *ecosystem.Graph) (*ResolveResult, error) {
 	result := &ResolveResult{
 		Graph:       graph,
@@ -263,8 +267,32 @@ func (r *resolver) computePlacement(graph *ecosystem.Graph) (*ResolveResult, err
 	}
 	result.Root = rootPlaced
 
-	// Place each dependency using hoisting.
-	placeChildren(rootPlaced, graph.Root, result)
+	// Phase 1: Place root's direct dependencies at root level first.
+	// This ensures root deps always win the root-level slot, matching
+	// npm's Arborist behavior.
+	for _, edge := range graph.Root.Dependencies {
+		if edge.Target == nil {
+			continue
+		}
+		path := "node_modules/" + edge.Name
+		placed := &PlacedNode{
+			Path:     path,
+			Node:     edge.Target,
+			Children: make(map[string]*PlacedNode),
+			Parent:   rootPlaced,
+		}
+		rootPlaced.Children[edge.Name] = placed
+		result.PlacedNodes[path] = placed
+	}
+
+	// Phase 2: Place transitive dependencies with hoisting.
+	for _, edge := range graph.Root.Dependencies {
+		if edge.Target == nil {
+			continue
+		}
+		placed := rootPlaced.Children[edge.Name]
+		placeChildren(placed, edge.Target, result)
+	}
 
 	return result, nil
 }
