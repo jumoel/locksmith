@@ -110,6 +110,18 @@ func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult) *yaml.
 func buildImporterDeps(deps map[string]ecosystem.DeclaredDep, result *ResolveResult) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
+	// Build a lookup from dep name to the resolved version via root edges.
+	// This is necessary when multiple versions of the same package exist
+	// (e.g., is-odd@3.0.1 as root dep and is-odd@0.1.2 as transitive dep).
+	rootVersions := make(map[string]string)
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil {
+				rootVersions[edge.Name] = edge.Target.Version
+			}
+		}
+	}
+
 	names := make([]string, 0, len(deps))
 	for n := range deps {
 		names = append(names, n)
@@ -118,14 +130,7 @@ func buildImporterDeps(deps map[string]ecosystem.DeclaredDep, result *ResolveRes
 
 	for _, name := range names {
 		dep := deps[name]
-		// Find resolved version from result.
-		resolvedVersion := ""
-		for _, pkg := range result.Packages {
-			if pkg.Node.Name == name {
-				resolvedVersion = pkg.Node.Version
-				break
-			}
-		}
+		resolvedVersion := rootVersions[name]
 
 		depNode := &yaml.Node{Kind: yaml.MappingNode}
 		addMapping(depNode, "specifier", scalarNode(dep.Constraint, 0))
