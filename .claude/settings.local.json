@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:docs.npmjs.com)",
+      "WebFetch(domain:pnpm.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:www.abrahamberg.com)",
+      "WebFetch(domain:blog.npmjs.org)",
+      "WebFetch(domain:lfx.rushstack.io)",
+      "WebFetch(domain:semver.npmjs.com)",
+      "WebFetch(domain:oneuptime.com)",
+      "Bash(find /Users/julian.ellehauge/work/jumoel/mono/ecosystems -name *.go -type f)",
+      "Bash(go version:*)",
+      "Bash(git init:*)",
+      "Bash(go mod:*)",
+      "Bash(go build:*)",
+      "Bash(go vet:*)",
+      "Bash(go get:*)",
+      "Bash(go test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
