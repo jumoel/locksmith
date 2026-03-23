@@ -1,0 +1,9 @@
+{
+  "name": "locksmith-test-multi-dep",
+  "version": "1.0.0",
+  "dependencies": {
+    "ms": "^2.1.0",
+    "bytes": "^3.1.0",
+    "mime-types": "^2.1.0"
+  }
+}

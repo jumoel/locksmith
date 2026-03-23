@@ -1,0 +1,6 @@
+services:
+  test-runner:
+    build: .
+    platform: linux/amd64
+    volumes:
+      - ./workspace:/workspace

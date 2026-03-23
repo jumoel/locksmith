@@ -1,0 +1,7 @@
+{
+  "name": "locksmith-test-scoped",
+  "version": "1.0.0",
+  "dependencies": {
+    "@sindresorhus/is": "^5.0.0"
+  }
+}
