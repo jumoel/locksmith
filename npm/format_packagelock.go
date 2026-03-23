@@ -32,11 +32,17 @@ func (om orderedMap) MarshalJSON() ([]byte, error) {
 		}
 		buf.Write(key)
 		buf.WriteByte(':')
-		val, err := json.Marshal(entry.Value)
-		if err != nil {
+		// Use an encoder with SetEscapeHTML(false) to avoid escaping
+		// characters like > and < in engine constraints.
+		var valBuf bytes.Buffer
+		enc := json.NewEncoder(&valBuf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(entry.Value); err != nil {
 			return nil, err
 		}
-		buf.Write(val)
+		// Encoder.Encode appends a newline, trim it.
+		b := valBuf.Bytes()
+		buf.Write(bytes.TrimRight(b, "\n"))
 	}
 	buf.WriteByte('}')
 	return buf.Bytes(), nil
@@ -136,11 +142,29 @@ func buildRootEntry(project *ecosystem.ProjectSpec) orderedMap {
 }
 
 // buildPackageEntry constructs a non-root package entry from a resolved node.
+// Field order matches npm's output: version, resolved, integrity, dev, optional,
+// hasInstallScript, license, bin, dependencies, optionalDependencies, engines, os, cpu, deprecated.
 func buildPackageEntry(node *ecosystem.Node) orderedMap {
 	entry := orderedMap{
 		{Key: "version", Value: node.Version},
 		{Key: "resolved", Value: node.TarballURL},
 		{Key: "integrity", Value: node.Integrity},
+	}
+
+	if node.DevOnly {
+		entry = append(entry, orderedEntry{Key: "dev", Value: true})
+	}
+	if node.Optional {
+		entry = append(entry, orderedEntry{Key: "optional", Value: true})
+	}
+	if node.HasInstallScript {
+		entry = append(entry, orderedEntry{Key: "hasInstallScript", Value: true})
+	}
+	if node.License != "" {
+		entry = append(entry, orderedEntry{Key: "license", Value: node.License})
+	}
+	if len(node.Bin) > 0 {
+		entry = append(entry, orderedEntry{Key: "bin", Value: sortedStringMap(node.Bin)})
 	}
 
 	// Collect dependency constraints grouped by type.
@@ -165,21 +189,6 @@ func buildPackageEntry(node *ecosystem.Node) orderedMap {
 		}
 	}
 
-	if node.DevOnly {
-		entry = append(entry, orderedEntry{Key: "dev", Value: true})
-	}
-	if node.Optional {
-		entry = append(entry, orderedEntry{Key: "optional", Value: true})
-	}
-	if node.HasInstallScript {
-		entry = append(entry, orderedEntry{Key: "hasInstallScript", Value: true})
-	}
-	if node.License != "" {
-		entry = append(entry, orderedEntry{Key: "license", Value: node.License})
-	}
-	if len(node.Bin) > 0 {
-		entry = append(entry, orderedEntry{Key: "bin", Value: sortedStringMap(node.Bin)})
-	}
 	if len(node.Engines) > 0 {
 		entry = append(entry, orderedEntry{Key: "engines", Value: sortedStringMap(node.Engines)})
 	}
