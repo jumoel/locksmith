@@ -11,6 +11,7 @@ import (
 
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/npm"
+	"github.com/jumoel/locksmith/pnpm"
 )
 
 // GenerateResult holds the output of lockfile generation.
@@ -24,64 +25,71 @@ type GenerateResult struct {
 
 // Generate parses the spec file, resolves dependencies, and produces a lockfile.
 func Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
-	parser, registry, resolver, formatter, err := buildPipeline(opts)
-	if err != nil {
-		return nil, err
+	switch opts.OutputFormat {
+	case FormatPackageLockV3, FormatNpmShrinkwrap:
+		return generateNpm(ctx, opts)
+	case FormatPnpmLockV9:
+		return generatePnpm(ctx, opts)
+	case FormatPackageLockV1:
+		return nil, fmt.Errorf("package-lock.json v1 is not yet implemented")
+	case FormatPackageLockV2:
+		return nil, fmt.Errorf("package-lock.json v2 is not yet implemented")
+	case FormatPnpmLockV5:
+		return nil, fmt.Errorf("pnpm-lock.yaml v5 is not yet implemented")
+	case FormatPnpmLockV6:
+		return nil, fmt.Errorf("pnpm-lock.yaml v6 is not yet implemented")
+	default:
+		return nil, fmt.Errorf("unknown output format: %s", opts.OutputFormat)
 	}
+}
+
+func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
+	parser := npm.NewSpecParser()
+	registry := npm.NewRegistryClient(opts.RegistryURL)
+	resolver := npm.NewResolver()
+	formatter := npm.NewPackageLockV3Formatter()
 
 	spec, err := parser.Parse(opts.SpecFile)
 	if err != nil {
-		return nil, fmt.Errorf("parsing spec file: %w", err)
+		return nil, fmt.Errorf("parsing package.json: %w", err)
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{
-		CutoffDate: opts.CutoffDate,
-	}
-
-	graph, err := resolver.Resolve(ctx, spec, registry, resolveOpts)
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate}
+	result, err := resolver.ResolveWithPlacement(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
 	}
 
-	lockfile, err := formatter.Format(graph, spec)
+	lockfile, err := formatter.FormatFromResult(result, spec)
 	if err != nil {
 		return nil, fmt.Errorf("formatting lockfile: %w", err)
 	}
 
-	return &GenerateResult{
-		Lockfile: lockfile,
-		Graph:    graph,
-	}, nil
+	return &GenerateResult{Lockfile: lockfile, Graph: result.Graph}, nil
 }
 
-// buildPipeline wires up the parser, registry, resolver, and formatter
-// based on the requested output format.
-func buildPipeline(opts GenerateOptions) (ecosystem.SpecParser, ecosystem.Registry, ecosystem.Resolver, ecosystem.Formatter, error) {
-	switch opts.OutputFormat {
-	case FormatPackageLockV3, FormatNpmShrinkwrap:
-		return buildNpmPipeline(opts)
-	case FormatPackageLockV1:
-		return nil, nil, nil, nil, fmt.Errorf("package-lock.json v1 is not yet implemented")
-	case FormatPackageLockV2:
-		return nil, nil, nil, nil, fmt.Errorf("package-lock.json v2 is not yet implemented")
-	case FormatPnpmLockV9:
-		return nil, nil, nil, nil, fmt.Errorf("pnpm-lock.yaml v9 is not yet implemented")
-	case FormatPnpmLockV5:
-		return nil, nil, nil, nil, fmt.Errorf("pnpm-lock.yaml v5 is not yet implemented")
-	case FormatPnpmLockV6:
-		return nil, nil, nil, nil, fmt.Errorf("pnpm-lock.yaml v6 is not yet implemented")
-	default:
-		return nil, nil, nil, nil, fmt.Errorf("unknown output format: %s", opts.OutputFormat)
-	}
-}
-
-func buildNpmPipeline(opts GenerateOptions) (ecosystem.SpecParser, ecosystem.Registry, ecosystem.Resolver, ecosystem.Formatter, error) {
+func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
+	// pnpm uses the npm registry, just a different resolver and formatter.
 	parser := npm.NewSpecParser()
 	registry := npm.NewRegistryClient(opts.RegistryURL)
+	resolver := pnpm.NewResolver()
+	formatter := pnpm.NewPnpmLockV9Formatter()
 
-	// TODO: implement npm resolver and formatter
-	_ = parser
-	_ = registry
+	spec, err := parser.Parse(opts.SpecFile)
+	if err != nil {
+		return nil, fmt.Errorf("parsing package.json: %w", err)
+	}
 
-	return nil, nil, nil, nil, fmt.Errorf("npm pipeline not yet fully wired (resolver and formatter pending)")
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate}
+	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
+	if err != nil {
+		return nil, fmt.Errorf("resolving dependencies: %w", err)
+	}
+
+	lockfile, err := formatter.FormatFromResult(result, spec)
+	if err != nil {
+		return nil, fmt.Errorf("formatting lockfile: %w", err)
+	}
+
+	return &GenerateResult{Lockfile: lockfile, Graph: result.Graph}, nil
 }
