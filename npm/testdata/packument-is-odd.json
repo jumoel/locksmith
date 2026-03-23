@@ -1,0 +1,111 @@
+{
+  "_id": "is-odd",
+  "name": "is-odd",
+  "dist-tags": {
+    "latest": "3.0.1"
+  },
+  "time": {
+    "created": "2015-01-01T00:00:00.000Z",
+    "modified": "2025-06-01T12:00:00.000Z",
+    "1.0.0": "2015-01-01T00:00:00.000Z",
+    "2.0.0": "2016-01-01T00:00:00.000Z",
+    "3.0.0": "2017-06-01T00:00:00.000Z",
+    "3.0.1": "2025-06-01T00:00:00.000Z"
+  },
+  "versions": {
+    "1.0.0": {
+      "name": "is-odd",
+      "version": "1.0.0",
+      "license": "MIT",
+      "dependencies": {},
+      "dist": {
+        "integrity": "sha512-A1b2C3d4E5f6a7B8c9D0e1F2a3B4c5D6e7F8a9B0c1D2e3F4a5B6c7D8e9F0a1B2==",
+        "shasum": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        "tarball": "https://registry.npmjs.org/is-odd/-/is-odd-1.0.0.tgz",
+        "unpackedSize": 2048,
+        "fileCount": 4
+      }
+    },
+    "2.0.0": {
+      "name": "is-odd",
+      "version": "2.0.0",
+      "license": "MIT",
+      "dependencies": {},
+      "engines": {
+        "node": ">=6"
+      },
+      "dist": {
+        "integrity": "sha512-B2c3D4e5F6a7B8c9D0e1F2a3B4c5D6e7F8a9B0c1D2e3F4a5B6c7D8e9F0a1B2c3==",
+        "shasum": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1",
+        "tarball": "https://registry.npmjs.org/is-odd/-/is-odd-2.0.0.tgz",
+        "unpackedSize": 2560,
+        "fileCount": 5
+      }
+    },
+    "3.0.0": {
+      "name": "is-odd",
+      "version": "3.0.0",
+      "license": "MIT",
+      "dependencies": {
+        "is-number": "^6.0.0"
+      },
+      "devDependencies": {
+        "mocha": "^5.0.0"
+      },
+      "engines": {
+        "node": ">=8"
+      },
+      "scripts": {
+        "test": "mocha"
+      },
+      "bin": {
+        "is-odd": "./bin/cli.js"
+      },
+      "dist": {
+        "integrity": "sha512-C3d4E5f6A7b8C9d0E1f2A3b4C5d6E7f8A9b0C1d2E3f4A5b6C7d8E9f0A1b2C3d4==",
+        "shasum": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2",
+        "tarball": "https://registry.npmjs.org/is-odd/-/is-odd-3.0.0.tgz",
+        "unpackedSize": 3072,
+        "fileCount": 7
+      }
+    },
+    "3.0.1": {
+      "name": "is-odd",
+      "version": "3.0.1",
+      "license": "MIT",
+      "dependencies": {
+        "is-number": "^7.0.0"
+      },
+      "devDependencies": {
+        "mocha": "^10.0.0"
+      },
+      "peerDependencies": {
+        "is-even": "^1.0.0"
+      },
+      "peerDependenciesMeta": {
+        "is-even": {
+          "optional": true
+        }
+      },
+      "engines": {
+        "node": ">=14"
+      },
+      "scripts": {
+        "test": "mocha",
+        "postinstall": "echo done"
+      },
+      "bin": {
+        "is-odd": "./bin/cli.js"
+      },
+      "os": ["linux", "darwin"],
+      "cpu": ["x64", "arm64"],
+      "dist": {
+        "integrity": "sha512-D4e5F6a7B8c9D0e1F2a3B4c5D6e7F8a9B0c1D2e3F4a5B6c7D8e9F0a1B2c3D4e5==",
+        "shasum": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3",
+        "tarball": "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz",
+        "unpackedSize": 3200,
+        "fileCount": 7
+      }
+    }
+  }
+}
