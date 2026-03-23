@@ -1,0 +1,110 @@
+package npm
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"sort"
+
+	"github.com/jumoel/locksmith/ecosystem"
+)
+
+// PackageLockV1Formatter produces package-lock.json lockfileVersion 1 output.
+// V1 uses a hierarchical `dependencies` section (no `packages` section).
+// This format was used by npm 5-6 and is also valid for npm-shrinkwrap.json
+// consumed by npm 1-4.
+type PackageLockV1Formatter struct{}
+
+func NewPackageLockV1Formatter() *PackageLockV1Formatter {
+	return &PackageLockV1Formatter{}
+}
+
+func (f *PackageLockV1Formatter) Format(graph *ecosystem.Graph, project *ecosystem.ProjectSpec) ([]byte, error) {
+	return nil, fmt.Errorf("use FormatFromResult for npm lockfile generation")
+}
+
+// FormatFromResult produces package-lock.json v1 bytes from a resolve result.
+func (f *PackageLockV1Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
+	lockfile := orderedMap{
+		{Key: "name", Value: project.Name},
+		{Key: "version", Value: project.Version},
+		{Key: "lockfileVersion", Value: 1},
+		{Key: "requires", Value: true},
+	}
+
+	// Build hierarchical dependencies from the placed node tree.
+	deps := buildV1Dependencies(result.Root)
+	if deps != nil {
+		lockfile = append(lockfile, orderedEntry{Key: "dependencies", Value: deps})
+	}
+
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(lockfile); err != nil {
+		return nil, fmt.Errorf("encoding lockfile: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// buildV1Dependencies recursively constructs the hierarchical dependencies
+// section from a placed node's children.
+func buildV1Dependencies(parent *PlacedNode) orderedMap {
+	if len(parent.Children) == 0 {
+		return nil
+	}
+
+	// Sort children by name.
+	names := make([]string, 0, len(parent.Children))
+	for name := range parent.Children {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	deps := make(orderedMap, 0, len(names))
+	for _, name := range names {
+		child := parent.Children[name]
+		entry := buildV1DepEntry(child)
+		deps = append(deps, orderedEntry{Key: name, Value: entry})
+	}
+
+	return deps
+}
+
+// buildV1DepEntry constructs a single dependency entry in the v1 format.
+func buildV1DepEntry(placed *PlacedNode) orderedMap {
+	node := placed.Node
+	entry := orderedMap{
+		{Key: "version", Value: node.Version},
+		{Key: "resolved", Value: node.TarballURL},
+		{Key: "integrity", Value: node.Integrity},
+	}
+
+	if node.DevOnly {
+		entry = append(entry, orderedEntry{Key: "dev", Value: true})
+	}
+	if node.Optional {
+		entry = append(entry, orderedEntry{Key: "optional", Value: true})
+	}
+
+	// "requires" is a flat map of dependency name -> constraint.
+	if len(node.Dependencies) > 0 {
+		requires := make(map[string]string)
+		for _, edge := range node.Dependencies {
+			requires[edge.Name] = edge.Constraint
+		}
+		if len(requires) > 0 {
+			entry = append(entry, orderedEntry{Key: "requires", Value: sortedStringMap(requires)})
+		}
+	}
+
+	// Nested dependencies (children that couldn't be hoisted).
+	nestedDeps := buildV1Dependencies(placed)
+	if nestedDeps != nil {
+		entry = append(entry, orderedEntry{Key: "dependencies", Value: nestedDeps})
+	}
+
+	return entry
+}

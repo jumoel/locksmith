@@ -26,14 +26,10 @@ type GenerateResult struct {
 // Generate parses the spec file, resolves dependencies, and produces a lockfile.
 func Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	switch opts.OutputFormat {
-	case FormatPackageLockV3, FormatNpmShrinkwrap:
+	case FormatPackageLockV1, FormatPackageLockV2, FormatPackageLockV3, FormatNpmShrinkwrap:
 		return generateNpm(ctx, opts)
 	case FormatPnpmLockV9:
 		return generatePnpm(ctx, opts)
-	case FormatPackageLockV1:
-		return nil, fmt.Errorf("package-lock.json v1 is not yet implemented")
-	case FormatPackageLockV2:
-		return nil, fmt.Errorf("package-lock.json v2 is not yet implemented")
 	case FormatPnpmLockV5:
 		return nil, fmt.Errorf("pnpm-lock.yaml v5 is not yet implemented")
 	case FormatPnpmLockV6:
@@ -43,11 +39,25 @@ func Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error
 	}
 }
 
+// npmFormatter is implemented by all npm lockfile formatters.
+type npmFormatter interface {
+	FormatFromResult(result *npm.ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error)
+}
+
 func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
 	registry := npm.NewRegistryClient(opts.RegistryURL)
 	resolver := npm.NewResolver()
-	formatter := npm.NewPackageLockV3Formatter()
+
+	var formatter npmFormatter
+	switch opts.OutputFormat {
+	case FormatPackageLockV1:
+		formatter = npm.NewPackageLockV1Formatter()
+	case FormatPackageLockV2:
+		formatter = npm.NewPackageLockV2Formatter()
+	case FormatPackageLockV3, FormatNpmShrinkwrap:
+		formatter = npm.NewPackageLockV3Formatter()
+	}
 
 	spec, err := parser.Parse(opts.SpecFile)
 	if err != nil {
