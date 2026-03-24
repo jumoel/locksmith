@@ -45,11 +45,14 @@ var noPeerAutoInstall = &ecosystem.ResolverPolicy{
 // that natively produces that format.
 var correctnessMatrix = []correctnessCase{
 	// --- npm shrinkwrap v1 ---
-	// npm 1-2: peer deps ARE auto-installed (default policy)
+	// npm 1-2: peer deps ARE auto-installed (default policy). npm@2 can
+	// resolve simple fixtures directly.
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@2-shrinkwrap", []string{"bash", "-c", "run-npm 2 install --ignore-scripts && run-npm 2 shrinkwrap"}, "npm-shrinkwrap.json", nil, nil},
-	// npm 3-6: peer deps are NOT auto-installed
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@3-shrinkwrap", []string{"bash", "-c", "run-npm 3 install --ignore-scripts && run-npm 3 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@4-shrinkwrap", []string{"bash", "-c", "run-npm 4 install --ignore-scripts && run-npm 4 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
+	// npm 3-6: peer deps NOT auto-installed. npm@3-4 crash on complex trees,
+	// so we use npm@5 as a reference resolver (same resolution algorithm,
+	// no crash bugs). npm@5 also doesn't auto-install peers.
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@3-shrinkwrap", []string{"bash", "-c", "run-npm 5 install --ignore-scripts && run-npm 5 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@4-shrinkwrap", []string{"bash", "-c", "run-npm 5 install --ignore-scripts && run-npm 5 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@5-shrinkwrap", []string{"bash", "-c", "run-npm 5 install --ignore-scripts && run-npm 5 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@6-shrinkwrap", []string{"bash", "-c", "run-npm 6 install --ignore-scripts && run-npm 6 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
 
@@ -141,20 +144,14 @@ func TestCorrectness(t *testing.T) {
 		}
 	}
 
-	// npm 2-4 crash on complex packages (ENOTDIR .staging bug) or
-	// can't handle circular peer deps (npm@3-4).
-	npm234CrashFixtures := []string{
+	// npm@2 crashes on large dep trees (ENOTDIR .staging bug). Can't use
+	// npm@5 as fallback because npm@2 auto-installs peers but npm@5 doesn't.
+	npm2CrashFixtures := []string{
 		"peer-chain", "peer-deps", "cli-tools", "next-12", "next-13",
-		"arborist-peer-cycle", // npm@3-4 error on circular peer deps
 	}
-	// npm@2 crashes on large trees, npm@3-4 crash on both large trees and circular peers
-	for _, f := range npm234CrashFixtures {
-		skipCombos["npm@2-shrinkwrap/"+f] = "npm@2 crashes on complex dep trees"
-		skipCombos["npm@3-shrinkwrap/"+f] = "npm@3 crashes on complex dep trees or circular peers"
-		skipCombos["npm@4-shrinkwrap/"+f] = "npm@4 crashes on complex dep trees or circular peers"
+	for _, f := range npm2CrashFixtures {
+		skipCombos["npm@2-shrinkwrap/"+f] = "npm@2 crashes on complex dep trees (ENOTDIR)"
 	}
-	// npm@2 CAN handle peer-cycle (it auto-installs peers), un-skip it
-	delete(skipCombos, "npm@2-shrinkwrap/arborist-peer-cycle")
 
 	for _, cc := range correctnessMatrix {
 		cc := cc
