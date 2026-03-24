@@ -313,8 +313,18 @@ func extractVersionsJSON(t *testing.T, data []byte) []string {
 		}
 	}
 
-	sort.Strings(versions)
-	return versions
+	// Deduplicate: when the same name@version appears at multiple
+	// node_modules paths we only care about the unique set.
+	seen := make(map[string]bool)
+	var deduped []string
+	for _, v := range versions {
+		if !seen[v] {
+			seen[v] = true
+			deduped = append(deduped, v)
+		}
+	}
+	sort.Strings(deduped)
+	return deduped
 }
 
 func extractV1Deps(prefix string, deps map[string]interface{}, versions *[]string) {
