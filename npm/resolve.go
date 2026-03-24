@@ -82,15 +82,22 @@ func (r *Resolver) ResolveWithPlacement(ctx context.Context, project *ecosystem.
 
 // resolver holds state during resolution.
 type resolver struct {
-	registry  ecosystem.Registry
-	cutoff    *time.Time
-	ctx       context.Context
-	nodes     map[string]*ecosystem.Node // cache: "name@version" -> node
-	resolving map[string]bool            // cycle detection: "name@version" -> in progress
+	registry    ecosystem.Registry
+	cutoff      *time.Time
+	ctx         context.Context
+	nodes       map[string]*ecosystem.Node // cache: "name@version" -> node
+	resolving   map[string]bool            // cycle detection: "name@version" -> in progress
+	projectDeps map[string]bool            // names of packages declared at project level
 }
 
 // resolveLogical builds the logical dependency graph.
 func (r *resolver) resolveLogical(project *ecosystem.ProjectSpec) (*ecosystem.Graph, error) {
+	// Record project-level dep names for peer dep provider checks.
+	r.projectDeps = make(map[string]bool)
+	for _, dep := range project.Dependencies {
+		r.projectDeps[dep.Name] = true
+	}
+
 	graph := &ecosystem.Graph{
 		Nodes: make(map[string]*ecosystem.Node),
 	}
@@ -262,6 +269,54 @@ func (r *resolver) resolveDep(graph *ecosystem.Graph, name, constraint string, d
 			Constraint: depConstraint,
 			Target:     child,
 			Type:       ecosystem.DepOptional,
+		})
+	}
+
+	// Auto-install peer dependencies (npm 7+ behavior).
+	// Skip optional peer deps and peers already provided by the project
+	// or already resolved elsewhere in the tree.
+	peerNames := sortedKeys(meta.PeerDeps)
+	for _, depName := range peerNames {
+		// Skip if already resolved as a regular or optional dep.
+		alreadyResolved := false
+		for _, edge := range node.Dependencies {
+			if edge.Name == depName {
+				alreadyResolved = true
+				break
+			}
+		}
+		if alreadyResolved {
+			continue
+		}
+		// Skip optional peer deps.
+		if pm, ok := meta.PeerDepsMeta[depName]; ok && pm.Optional {
+			continue
+		}
+		// Skip if provided by the project.
+		if r.projectDeps[depName] {
+			continue
+		}
+		// Skip if already resolved elsewhere in the tree.
+		found := false
+		for k := range r.nodes {
+			if strings.HasPrefix(k, depName+"@") {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		depConstraint := meta.PeerDeps[depName]
+		child, err := r.resolveDep(graph, depName, depConstraint, ecosystem.DepPeer)
+		if err != nil {
+			continue // Peer dep resolution failure is non-fatal.
+		}
+		node.Dependencies = append(node.Dependencies, &ecosystem.Edge{
+			Name:       depName,
+			Constraint: depConstraint,
+			Target:     child,
+			Type:       ecosystem.DepPeer,
 		})
 	}
 
