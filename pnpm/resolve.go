@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jumoel/locksmith/ecosystem"
@@ -68,16 +69,24 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 
 // pnpmResolver holds state during resolution.
 type pnpmResolver struct {
-	registry  ecosystem.Registry
-	cutoff    *time.Time
-	ctx       context.Context
-	nodes     map[string]*ecosystem.Node // cache: "name@version" -> node
-	resolving map[string]bool            // cycle detection
-	packages  map[string]*ResolvedPackage
+	registry     ecosystem.Registry
+	cutoff       *time.Time
+	ctx          context.Context
+	nodes        map[string]*ecosystem.Node // cache: "name@version" -> node
+	resolving    map[string]bool            // cycle detection
+	packages     map[string]*ResolvedPackage
+	projectDeps  map[string]bool // names of packages declared at project level
 }
 
 // resolve builds the dependency graph from a project spec.
 func (r *pnpmResolver) resolve(project *ecosystem.ProjectSpec) (*ecosystem.Graph, error) {
+	// Record all project-level dep names so the peer dep auto-installer
+	// knows which packages the project provides.
+	r.projectDeps = make(map[string]bool)
+	for _, dep := range project.Dependencies {
+		r.projectDeps[dep.Name] = true
+	}
+
 	graph := &ecosystem.Graph{
 		Root:  &ecosystem.Node{Name: project.Name, Version: project.Version},
 		Nodes: make(map[string]*ecosystem.Node),
@@ -164,6 +173,9 @@ func (r *pnpmResolver) resolveDep(graph *ecosystem.Graph, name, constraint strin
 		Bin:              meta.Bin,
 		License:          meta.License,
 		Deprecated:       meta.Deprecated,
+		PeerDeps:         meta.PeerDeps,
+		PeerDepsMeta:     meta.PeerDepsMeta,
+		Funding:          meta.Funding,
 	}
 	if depType == ecosystem.DepDev {
 		node.DevOnly = true
@@ -205,6 +217,47 @@ func (r *pnpmResolver) resolveDep(graph *ecosystem.Graph, name, constraint strin
 		}
 		node.Dependencies = append(node.Dependencies, &ecosystem.Edge{
 			Name: depName, Constraint: depConstraint, Target: child, Type: ecosystem.DepOptional,
+		})
+		resolvedDeps[depName] = child.Version
+	}
+
+	// Auto-install peer dependencies (pnpm's autoInstallPeers behavior).
+	// Only resolve non-optional peer deps that aren't already provided.
+	// Optional peer deps are recorded as metadata but NOT installed unless
+	// explicitly requested by the consumer.
+	peerNames := sortedKeys(meta.PeerDeps)
+	for _, depName := range peerNames {
+		if _, already := resolvedDeps[depName]; already {
+			continue // Already resolved as regular or optional dep.
+		}
+		// Skip optional peer deps - pnpm doesn't auto-install them.
+		if pm, ok := meta.PeerDepsMeta[depName]; ok && pm.Optional {
+			continue
+		}
+		// Check if already provided by the project or resolved elsewhere.
+		// pnpm considers a peer dep satisfied if the project declares it
+		// (even if not yet resolved during DFS) or if any version exists
+		// in the resolved tree.
+		if r.projectDeps[depName] {
+			continue
+		}
+		alreadyProvided := false
+		for k := range r.nodes {
+			if strings.HasPrefix(k, depName+"@") {
+				alreadyProvided = true
+				break
+			}
+		}
+		if alreadyProvided {
+			continue
+		}
+		depConstraint := meta.PeerDeps[depName]
+		child, err := r.resolveDep(graph, depName, depConstraint, ecosystem.DepPeer)
+		if err != nil {
+			continue // Peer dep resolution failure is non-fatal.
+		}
+		node.Dependencies = append(node.Dependencies, &ecosystem.Edge{
+			Name: depName, Constraint: depConstraint, Target: child, Type: ecosystem.DepPeer,
 		})
 		resolvedDeps[depName] = child.Version
 	}

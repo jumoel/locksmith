@@ -316,13 +316,16 @@ func extractVersionsYAML(t *testing.T, data []byte) []string {
 	var versions []string
 
 	// Extract from pnpm-lock.yaml: lines matching /name@version: or /name/version:
+	// Only match entries at the top level of packages/snapshots sections
+	// (indented exactly 2 spaces), not deeply nested entries like
+	// transitivePeerDependencies list items.
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "/") && strings.HasSuffix(trimmed, ":") {
+
+		// v5/v6 format: /name@version: or /name/version: (2-space indent)
+		if strings.HasPrefix(line, "  /") && strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(line, "    ") {
 			key := strings.TrimSuffix(strings.TrimPrefix(trimmed, "/"), ":")
-			// Normalize /name/version -> name@version and /name@version -> name@version
 			if !strings.Contains(key, "@") {
-				// v5 format: /name/version -> name@version
 				lastSlash := strings.LastIndex(key, "/")
 				if lastSlash > 0 {
 					key = key[:lastSlash] + "@" + key[lastSlash+1:]
@@ -330,11 +333,21 @@ func extractVersionsYAML(t *testing.T, data []byte) []string {
 			}
 			versions = append(versions, key)
 		}
-		// v9 snapshots format: name@version:
-		if !strings.HasPrefix(trimmed, "/") && strings.Contains(trimmed, "@") && strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "#") {
+
+		// v9 snapshots/packages format: name@version: (2-space indent, no leading /)
+		// Must contain version digits after the last @, not just a bare scoped name.
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "    ") &&
+			!strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "#") &&
+			!strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "'") &&
+			strings.Contains(trimmed, "@") && strings.HasSuffix(trimmed, ":") {
 			key := strings.TrimSuffix(trimmed, ":")
-			if strings.Count(key, "@") == 1 || (strings.HasPrefix(key, "@") && strings.Count(key, "@") == 2) {
-				versions = append(versions, key)
+			// Verify it has a version component (digits after the last @)
+			lastAt := strings.LastIndex(key, "@")
+			if lastAt > 0 && lastAt < len(key)-1 {
+				versionPart := key[lastAt+1:]
+				if len(versionPart) > 0 && versionPart[0] >= '0' && versionPart[0] <= '9' {
+					versions = append(versions, key)
+				}
 			}
 		}
 	}
