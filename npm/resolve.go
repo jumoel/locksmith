@@ -150,8 +150,10 @@ func (r *resolver) resolveDep(graph *ecosystem.Graph, name, constraint string, d
 		versionMap[v.String()] = vi.Version
 	}
 
-	// Pick the highest satisfying version.
-	best := semver.MaxSatisfying(parsed, c)
+	// npm-pick-manifest algorithm: prefer the "latest" dist-tag version
+	// if it satisfies the constraint. Otherwise fall back to highest matching.
+	distTags, _ := r.registry.FetchDistTags(r.ctx, name)
+	best := semver.PickVersion(parsed, c, distTags["latest"])
 	if best == nil {
 		return nil, fmt.Errorf("no version of %s satisfies %s", name, constraint)
 	}

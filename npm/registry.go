@@ -159,3 +159,12 @@ func (r *RegistryClient) FetchMetadata(ctx context.Context, name string, version
 
 	return meta, nil
 }
+
+// FetchDistTags returns the dist-tags for a package.
+func (r *RegistryClient) FetchDistTags(ctx context.Context, name string) (map[string]string, error) {
+	p, err := r.fetchPackument(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return p.DistTags, nil
+}

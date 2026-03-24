@@ -120,7 +120,8 @@ func (r *bunResolver) resolveDep(graph *ecosystem.Graph, name, constraint string
 		versionMap[v.String()] = vi.Version
 	}
 
-	best := semver.MaxSatisfying(parsed, c)
+	distTags, _ := r.registry.FetchDistTags(r.ctx, name)
+	best := semver.PickVersion(parsed, c, distTags["latest"])
 	if best == nil {
 		return nil, fmt.Errorf("no version of %s satisfies %s", name, constraint)
 	}

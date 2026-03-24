@@ -77,6 +77,20 @@ func (m *mockRegistry) FetchMetadata(ctx context.Context, name, version string) 
 	return meta, nil
 }
 
+func (m *mockRegistry) FetchDistTags(ctx context.Context, name string) (map[string]string, error) {
+	pkg, ok := m.packages[name]
+	if !ok {
+		return nil, fmt.Errorf("package %s not found", name)
+	}
+	var latest string
+	for v := range pkg.versions {
+		if latest == "" || v > latest {
+			latest = v
+		}
+	}
+	return map[string]string{"latest": latest}, nil
+}
+
 // baseTime is a fixed reference point for test timestamps.
 var baseTime = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 

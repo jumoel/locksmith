@@ -112,3 +112,27 @@ func MaxSatisfying(versions []*Version, constraint *Constraint) *Version {
 	}
 	return best
 }
+
+// PickVersion implements npm's npm-pick-manifest algorithm.
+// It prefers the "latest" dist-tag version if it satisfies the constraint,
+// otherwise falls back to the highest satisfying version. This matches
+// npm's behavior where authors can publish higher versions that aren't
+// tagged as latest (experimental, pre-release, etc.).
+func PickVersion(versions []*Version, constraint *Constraint, latestTag string) *Version {
+	// If a latest tag is provided and satisfies the constraint, prefer it.
+	if latestTag != "" {
+		latest, err := Parse(latestTag)
+		if err == nil && constraint.Check(latest) {
+			// Find the exact version object in the list (for consistent pointer)
+			for _, v := range versions {
+				if v.Equal(latest) {
+					return v
+				}
+			}
+			// If not in the filtered list (e.g., cutoff removed it), fall through.
+		}
+	}
+
+	// Fall back to highest satisfying version.
+	return MaxSatisfying(versions, constraint)
+}

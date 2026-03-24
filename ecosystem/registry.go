@@ -45,4 +45,6 @@ type Registry interface {
 	FetchVersions(ctx context.Context, name string, cutoff *time.Time) ([]VersionInfo, error)
 	// FetchMetadata returns full metadata for a specific package version.
 	FetchMetadata(ctx context.Context, name string, version string) (*VersionMetadata, error)
+	// FetchDistTags returns the dist-tags for a package (e.g., {"latest": "1.0.0"}).
+	FetchDistTags(ctx context.Context, name string) (map[string]string, error)
 }
