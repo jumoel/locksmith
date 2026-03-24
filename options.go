@@ -6,13 +6,24 @@ import "time"
 type OutputFormat string
 
 const (
+	// npm lockfile formats.
 	FormatPackageLockV1 OutputFormat = "package-lock-v1"
 	FormatPackageLockV2 OutputFormat = "package-lock-v2"
 	FormatPackageLockV3 OutputFormat = "package-lock-v3"
 	FormatNpmShrinkwrap OutputFormat = "npm-shrinkwrap"
-	FormatPnpmLockV5    OutputFormat = "pnpm-lock-v5"
-	FormatPnpmLockV6    OutputFormat = "pnpm-lock-v6"
-	FormatPnpmLockV9    OutputFormat = "pnpm-lock-v9"
+
+	// pnpm lockfile formats.
+	FormatPnpmLockV5 OutputFormat = "pnpm-lock-v5"
+	FormatPnpmLockV6 OutputFormat = "pnpm-lock-v6"
+	FormatPnpmLockV9 OutputFormat = "pnpm-lock-v9"
+
+	// yarn lockfile formats.
+	FormatYarnClassic OutputFormat = "yarn-classic"
+	FormatYarnBerryV6 OutputFormat = "yarn-berry-v6"
+	FormatYarnBerryV8 OutputFormat = "yarn-berry-v8"
+
+	// bun lockfile formats.
+	FormatBunLock OutputFormat = "bun-lock"
 )
 
 // AllFormats returns all known output formats.
@@ -25,6 +36,10 @@ func AllFormats() []OutputFormat {
 		FormatPnpmLockV5,
 		FormatPnpmLockV6,
 		FormatPnpmLockV9,
+		FormatYarnClassic,
+		FormatYarnBerryV6,
+		FormatYarnBerryV8,
+		FormatBunLock,
 	}
 }
 

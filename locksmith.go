@@ -1,6 +1,6 @@
 // Package locksmith generates valid lockfiles from package spec files.
 //
-// It supports multiple ecosystems (npm, pnpm) and lockfile formats.
+// It supports multiple ecosystems (npm, pnpm, yarn, bun) and lockfile formats.
 // The core architecture is ecosystem-agnostic, with each ecosystem
 // providing its own registry client, resolver, and formatter implementations.
 package locksmith
@@ -9,9 +9,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jumoel/locksmith/bun"
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/npm"
 	"github.com/jumoel/locksmith/pnpm"
+	"github.com/jumoel/locksmith/yarn"
 )
 
 // GenerateResult holds the output of lockfile generation.
@@ -28,12 +30,12 @@ func Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error
 	switch opts.OutputFormat {
 	case FormatPackageLockV1, FormatPackageLockV2, FormatPackageLockV3, FormatNpmShrinkwrap:
 		return generateNpm(ctx, opts)
-	case FormatPnpmLockV9:
+	case FormatPnpmLockV5, FormatPnpmLockV6, FormatPnpmLockV9:
 		return generatePnpm(ctx, opts)
-	case FormatPnpmLockV5:
-		return nil, fmt.Errorf("pnpm-lock.yaml v5 is not yet implemented")
-	case FormatPnpmLockV6:
-		return nil, fmt.Errorf("pnpm-lock.yaml v6 is not yet implemented")
+	case FormatYarnClassic, FormatYarnBerryV6, FormatYarnBerryV8:
+		return generateYarn(ctx, opts)
+	case FormatBunLock:
+		return generateBun(ctx, opts)
 	default:
 		return nil, fmt.Errorf("unknown output format: %s", opts.OutputFormat)
 	}
@@ -78,12 +80,89 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	return &GenerateResult{Lockfile: lockfile, Graph: result.Graph}, nil
 }
 
+// pnpmFormatter is implemented by all pnpm lockfile formatters.
+type pnpmFormatter interface {
+	FormatFromResult(result *pnpm.ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error)
+}
+
 func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
-	// pnpm uses the npm registry, just a different resolver and formatter.
 	parser := npm.NewSpecParser()
 	registry := npm.NewRegistryClient(opts.RegistryURL)
 	resolver := pnpm.NewResolver()
-	formatter := pnpm.NewPnpmLockV9Formatter()
+
+	var formatter pnpmFormatter
+	switch opts.OutputFormat {
+	case FormatPnpmLockV5:
+		formatter = pnpm.NewPnpmLockV5Formatter()
+	case FormatPnpmLockV6:
+		formatter = pnpm.NewPnpmLockV6Formatter()
+	case FormatPnpmLockV9:
+		formatter = pnpm.NewPnpmLockV9Formatter()
+	}
+
+	spec, err := parser.Parse(opts.SpecFile)
+	if err != nil {
+		return nil, fmt.Errorf("parsing package.json: %w", err)
+	}
+
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate}
+	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
+	if err != nil {
+		return nil, fmt.Errorf("resolving dependencies: %w", err)
+	}
+
+	lockfile, err := formatter.FormatFromResult(result, spec)
+	if err != nil {
+		return nil, fmt.Errorf("formatting lockfile: %w", err)
+	}
+
+	return &GenerateResult{Lockfile: lockfile, Graph: result.Graph}, nil
+}
+
+// yarnFormatter is implemented by all yarn lockfile formatters.
+type yarnFormatter interface {
+	FormatFromResult(result *yarn.ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error)
+}
+
+func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
+	parser := npm.NewSpecParser()
+	registry := npm.NewRegistryClient(opts.RegistryURL)
+	resolver := yarn.NewResolver()
+
+	var formatter yarnFormatter
+	switch opts.OutputFormat {
+	case FormatYarnClassic:
+		formatter = yarn.NewYarnClassicFormatter()
+	case FormatYarnBerryV6:
+		formatter = yarn.NewYarnBerryV6Formatter()
+	case FormatYarnBerryV8:
+		formatter = yarn.NewYarnBerryV8Formatter()
+	}
+
+	spec, err := parser.Parse(opts.SpecFile)
+	if err != nil {
+		return nil, fmt.Errorf("parsing package.json: %w", err)
+	}
+
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate}
+	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
+	if err != nil {
+		return nil, fmt.Errorf("resolving dependencies: %w", err)
+	}
+
+	lockfile, err := formatter.FormatFromResult(result, spec)
+	if err != nil {
+		return nil, fmt.Errorf("formatting lockfile: %w", err)
+	}
+
+	return &GenerateResult{Lockfile: lockfile, Graph: result.Graph}, nil
+}
+
+func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
+	parser := npm.NewSpecParser()
+	registry := npm.NewRegistryClient(opts.RegistryURL)
+	resolver := bun.NewResolver()
+	formatter := bun.NewBunLockFormatter()
 
 	spec, err := parser.Parse(opts.SpecFile)
 	if err != nil {
