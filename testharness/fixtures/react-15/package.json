@@ -1,0 +1,8 @@
+{
+  "name": "locksmith-test-react-15",
+  "version": "1.0.0",
+  "dependencies": {
+    "react": "^15.0.0",
+    "react-dom": "^15.0.0"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "locksmith-test-pnpm-9",
+  "version": "1.0.0",
+  "dependencies": {
+    "pnpm": "^9.0.0"
+  }
+}

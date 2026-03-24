@@ -1,0 +1,7 @@
+{
+  "name": "locksmith-test-npm-6",
+  "version": "1.0.0",
+  "dependencies": {
+    "npm": "^6.0.0"
+  }
+}

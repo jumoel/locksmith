@@ -1,0 +1,7 @@
+{
+  "name": "locksmith-test-deep-chain",
+  "version": "1.0.0",
+  "dependencies": {
+    "webpack": "^5.90.0"
+  }
+}
