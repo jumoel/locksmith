@@ -325,6 +325,14 @@ func extractVersionsYAML(t *testing.T, data []byte) []string {
 		// v5/v6 format: /name@version: or /name/version: (2-space indent)
 		if strings.HasPrefix(line, "  /") && strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(line, "    ") {
 			key := strings.TrimSuffix(strings.TrimPrefix(trimmed, "/"), ":")
+
+			// Strip v5 peer context suffix (underscore-delimited) FIRST,
+			// before checking for @ format.
+			if idx := strings.Index(key, "_"); idx > 0 {
+				key = key[:idx]
+			}
+
+			// v5 format: name/version -> name@version
 			if !strings.Contains(key, "@") {
 				lastSlash := strings.LastIndex(key, "/")
 				if lastSlash > 0 {
@@ -352,10 +360,26 @@ func extractVersionsYAML(t *testing.T, data []byte) []string {
 		}
 	}
 
-	// Deduplicate (v9 has both packages and snapshots with same keys)
+	// Deduplicate and normalize.
+	// Strip pnpm peer context suffixes: "react-dom@18.3.1(react@18.3.1)" -> "react-dom@18.3.1"
+	// v9 has both packages and snapshots with same keys.
 	seen := make(map[string]bool)
 	var deduped []string
 	for _, v := range versions {
+		// Strip pnpm peer context suffixes:
+		// v9: "react-dom@18.3.1(react@18.3.1)" -> "react-dom@18.3.1"
+		// v5: "react-dom@18.3.1_react@18.3.1" -> "react-dom@18.3.1"
+		if idx := strings.Index(v, "("); idx > 0 {
+			v = v[:idx]
+		}
+		// For v5 underscore format: find the version part and strip everything after
+		// the first underscore that follows a version number.
+		if parts := strings.SplitN(v, "_", 2); len(parts) == 2 {
+			// Check if the part before _ looks like name@version
+			if strings.Contains(parts[0], "@") {
+				v = parts[0]
+			}
+		}
 		if !seen[v] {
 			seen[v] = true
 			deduped = append(deduped, v)
