@@ -285,35 +285,63 @@ func (r *resolver) computePlacement(graph *ecosystem.Graph) (*ResolveResult, err
 		result.PlacedNodes[path] = placed
 	}
 
-	// Phase 2: Place transitive dependencies with hoisting.
+	// Phase 2: Place transitive dependencies using BFS.
+	// BFS ensures shallower deps get the root slot before deeper deps,
+	// matching npm's Arborist behavior where direct dep transitive deps
+	// take priority over deeply nested ones.
+	type placeWork struct {
+		parent *PlacedNode
+		node   *ecosystem.Node
+	}
+	queue := make([]placeWork, 0)
 	for _, edge := range graph.Root.Dependencies {
 		if edge.Target == nil {
 			continue
 		}
-		placed := rootPlaced.Children[edge.Name]
-		placeChildren(placed, edge.Target, result)
+		queue = append(queue, placeWork{
+			parent: rootPlaced.Children[edge.Name],
+			node:   edge.Target,
+		})
+	}
+
+	seen := make(map[string]bool)
+	for len(queue) > 0 {
+		work := queue[0]
+		queue = queue[1:]
+
+		for _, edge := range work.node.Dependencies {
+			if edge.Target == nil {
+				continue
+			}
+
+			placed := placeDep(work.parent, edge, result)
+			if placed != nil {
+				key := edge.Target.Name + "@" + edge.Target.Version
+				if !seen[key] {
+					seen[key] = true
+					queue = append(queue, placeWork{parent: placed, node: edge.Target})
+				}
+			}
+		}
 	}
 
 	return result, nil
 }
 
-// placeChildren places all dependencies of a node into the node_modules tree,
-// hoisting as high as possible.
-func placeChildren(parent *PlacedNode, node *ecosystem.Node, result *ResolveResult) {
-	for _, edge := range node.Dependencies {
-		placeDep(parent, edge, result)
-	}
-}
-
 // placeDep attempts to place a dependency as high as possible in the tree.
-func placeDep(requiredBy *PlacedNode, edge *ecosystem.Edge, result *ResolveResult) {
+// Returns the placed node (or existing node if deduplicated), or nil if target is nil.
+//
+// The algorithm walks up from requiredBy toward root. At each level it checks:
+// 1. Does this level already have a DIFFERENT version of the same package? -> stop, can't go higher
+// 2. Does this level already have the SAME version? -> deduplicate, return existing
+// 3. Otherwise -> this level is a valid placement candidate, keep going up
+func placeDep(requiredBy *PlacedNode, edge *ecosystem.Edge, result *ResolveResult) *PlacedNode {
 	target := edge.Target
 	if target == nil {
-		return
+		return nil
 	}
 
-	// Try to hoist: walk up the tree to find the highest placement
-	// where no conflicting version exists.
+	// Walk up from requiredBy to find the shallowest valid placement.
 	bestPlacement := requiredBy
 	current := requiredBy
 
@@ -322,17 +350,13 @@ func placeDep(requiredBy *PlacedNode, edge *ecosystem.Edge, result *ResolveResul
 		if hasExisting {
 			if existing.Node.Version == target.Version {
 				// Same version already placed here - deduplicated.
-				return
+				return existing
 			}
-			// Conflict at this level - can't hoist to or past here.
+			// Conflict at this level - can't place here or higher.
 			break
 		}
 
-		// Check if an ancestor already has this package with a different version.
-		if ancestorHasConflict(current, edge.Name, target.Version) {
-			break
-		}
-
+		// This level has no conflict - it's a valid placement.
 		bestPlacement = current
 		current = current.Parent
 	}
@@ -341,8 +365,8 @@ func placeDep(requiredBy *PlacedNode, edge *ecosystem.Edge, result *ResolveResul
 	path := buildPath(bestPlacement, edge.Name)
 
 	// If already placed at this exact path, nothing to do.
-	if _, exists := result.PlacedNodes[path]; exists {
-		return
+	if existing, ok := result.PlacedNodes[path]; ok {
+		return existing
 	}
 
 	// Place the node.
@@ -355,21 +379,7 @@ func placeDep(requiredBy *PlacedNode, edge *ecosystem.Edge, result *ResolveResul
 	bestPlacement.Children[edge.Name] = placed
 	result.PlacedNodes[path] = placed
 
-	// Recursively place this node's dependencies.
-	placeChildren(placed, target, result)
-}
-
-// ancestorHasConflict checks if any ancestor of the given node already has
-// a different version of the named package placed.
-func ancestorHasConflict(node *PlacedNode, name, version string) bool {
-	current := node.Parent
-	for current != nil {
-		if existing, ok := current.Children[name]; ok {
-			return existing.Node.Version != version
-		}
-		current = current.Parent
-	}
-	return false
+	return placed
 }
 
 // buildPath constructs the node_modules path for a placed package.
