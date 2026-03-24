@@ -66,16 +66,22 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 
 // bunResolver holds state during resolution.
 type bunResolver struct {
-	registry  ecosystem.Registry
-	cutoff    *time.Time
-	ctx       context.Context
-	nodes     map[string]*ecosystem.Node // cache: "name@version" -> node
-	resolving map[string]bool            // cycle detection
-	packages  map[string]*ResolvedPackage
+	registry    ecosystem.Registry
+	cutoff      *time.Time
+	ctx         context.Context
+	nodes       map[string]*ecosystem.Node // cache: "name@version" -> node
+	resolving   map[string]bool            // cycle detection
+	packages    map[string]*ResolvedPackage
+	projectDeps map[string]bool
 }
 
 // resolve builds the dependency graph from a project spec.
 func (r *bunResolver) resolve(project *ecosystem.ProjectSpec) (*ecosystem.Graph, error) {
+	r.projectDeps = make(map[string]bool)
+	for _, dep := range project.Dependencies {
+		r.projectDeps[dep.Name] = true
+	}
+
 	graph := &ecosystem.Graph{
 		Root:  &ecosystem.Node{Name: project.Name, Version: project.Version},
 		Nodes: make(map[string]*ecosystem.Node),
@@ -215,6 +221,39 @@ func (r *bunResolver) resolveDep(graph *ecosystem.Graph, name, constraint string
 		}
 		node.Dependencies = append(node.Dependencies, &ecosystem.Edge{
 			Name: depName, Constraint: depConstraint, Target: child, Type: ecosystem.DepOptional,
+		})
+		depConstraints[depName] = depConstraint
+	}
+
+	// Auto-install peer dependencies.
+	peerNames := sortedKeys(meta.PeerDeps)
+	for _, depName := range peerNames {
+		if _, already := depConstraints[depName]; already {
+			continue
+		}
+		if pm, ok := meta.PeerDepsMeta[depName]; ok && pm.Optional {
+			continue
+		}
+		if r.projectDeps[depName] {
+			continue
+		}
+		found := false
+		for k := range r.nodes {
+			if strings.HasPrefix(k, depName+"@") {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		depConstraint := meta.PeerDeps[depName]
+		child, err := r.resolveDep(graph, depName, depConstraint, ecosystem.DepPeer)
+		if err != nil {
+			continue
+		}
+		node.Dependencies = append(node.Dependencies, &ecosystem.Edge{
+			Name: depName, Constraint: depConstraint, Target: child, Type: ecosystem.DepPeer,
 		})
 		depConstraints[depName] = depConstraint
 	}

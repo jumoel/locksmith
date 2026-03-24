@@ -106,13 +106,16 @@ func TestCorrectness(t *testing.T) {
 	})
 
 	// Known incompatible combinations where the real PM can't generate a
-	// lockfile for the fixture (not a locksmith bug).
+	// lockfile for the fixture, or where PM defaults differ from our config.
 	skipCombos := map[string]string{
 		// bun and pnpm@7 don't produce lockfiles for empty projects
 		"bun/zero-deps":       "bun deletes lockfile for empty projects",
 		"pnpm@7-v5/zero-deps": "pnpm@7 errors on empty projects",
 		// yarn@1 errors on optional deps that don't exist on the registry
 		"yarn@1/arborist-optional-missing": "yarn@1 errors on missing optional deps",
+		// pnpm@7 has autoInstallPeers=false by default (changed in pnpm 8)
+		"pnpm@7-v5/arborist-peer-cycle": "pnpm@7 does not auto-install peers by default",
+		"pnpm@7-v5/peer-chain":          "pnpm@7 does not auto-install peers by default",
 	}
 
 	for _, cc := range correctnessMatrix {
