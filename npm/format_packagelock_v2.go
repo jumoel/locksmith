@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/orderedjson"
 )
 
 // PackageLockV2Formatter produces package-lock.json lockfileVersion 2 output.
@@ -24,7 +25,7 @@ func (f *PackageLockV2Formatter) Format(graph *ecosystem.Graph, project *ecosyst
 // FormatFromResult produces package-lock.json v2 bytes from a resolve result.
 func (f *PackageLockV2Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	// Build the packages map (same as v3).
-	packages := make(map[string]orderedMap, len(result.PlacedNodes)+1)
+	packages := make(map[string]orderedjson.Map, len(result.PlacedNodes)+1)
 	packages[""] = buildRootEntry(project)
 	for path, placed := range result.PlacedNodes {
 		packages[path] = buildPackageEntry(placed.Node)
@@ -33,16 +34,16 @@ func (f *PackageLockV2Formatter) FormatFromResult(result *ResolveResult, project
 	// Build the hierarchical dependencies (same as v1).
 	deps := buildV1Dependencies(result.Root)
 
-	lockfile := orderedMap{
+	lockfile := orderedjson.Map{
 		{Key: "name", Value: project.Name},
 		{Key: "version", Value: project.Version},
 		{Key: "lockfileVersion", Value: 2},
 		{Key: "requires", Value: true},
-		{Key: "packages", Value: buildOrderedPackages(packages)},
+		{Key: "packages", Value: orderedjson.FromStringMapSorted(packages)},
 	}
 
 	if deps != nil {
-		lockfile = append(lockfile, orderedEntry{Key: "dependencies", Value: deps})
+		lockfile = append(lockfile, orderedjson.Entry{Key: "dependencies", Value: deps})
 	}
 
 	var buf bytes.Buffer

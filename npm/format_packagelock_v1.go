@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/orderedjson"
 )
 
 // PackageLockV1Formatter produces package-lock.json lockfileVersion 1 output.
@@ -25,7 +26,7 @@ func (f *PackageLockV1Formatter) Format(graph *ecosystem.Graph, project *ecosyst
 
 // FormatFromResult produces package-lock.json v1 bytes from a resolve result.
 func (f *PackageLockV1Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
-	lockfile := orderedMap{
+	lockfile := orderedjson.Map{
 		{Key: "name", Value: project.Name},
 		{Key: "version", Value: project.Version},
 		{Key: "lockfileVersion", Value: 1},
@@ -35,7 +36,7 @@ func (f *PackageLockV1Formatter) FormatFromResult(result *ResolveResult, project
 	// Build hierarchical dependencies from the placed node tree.
 	deps := buildV1Dependencies(result.Root)
 	if deps != nil {
-		lockfile = append(lockfile, orderedEntry{Key: "dependencies", Value: deps})
+		lockfile = append(lockfile, orderedjson.Entry{Key: "dependencies", Value: deps})
 	}
 
 	var buf bytes.Buffer
@@ -51,7 +52,7 @@ func (f *PackageLockV1Formatter) FormatFromResult(result *ResolveResult, project
 
 // buildV1Dependencies recursively constructs the hierarchical dependencies
 // section from a placed node's children.
-func buildV1Dependencies(parent *PlacedNode) orderedMap {
+func buildV1Dependencies(parent *PlacedNode) orderedjson.Map {
 	if len(parent.Children) == 0 {
 		return nil
 	}
@@ -63,30 +64,30 @@ func buildV1Dependencies(parent *PlacedNode) orderedMap {
 	}
 	sort.Strings(names)
 
-	deps := make(orderedMap, 0, len(names))
+	deps := make(orderedjson.Map, 0, len(names))
 	for _, name := range names {
 		child := parent.Children[name]
 		entry := buildV1DepEntry(child)
-		deps = append(deps, orderedEntry{Key: name, Value: entry})
+		deps = append(deps, orderedjson.Entry{Key: name, Value: entry})
 	}
 
 	return deps
 }
 
 // buildV1DepEntry constructs a single dependency entry in the v1 format.
-func buildV1DepEntry(placed *PlacedNode) orderedMap {
+func buildV1DepEntry(placed *PlacedNode) orderedjson.Map {
 	node := placed.Node
-	entry := orderedMap{
+	entry := orderedjson.Map{
 		{Key: "version", Value: node.Version},
 		{Key: "resolved", Value: node.TarballURL},
 		{Key: "integrity", Value: node.Integrity},
 	}
 
 	if node.DevOnly {
-		entry = append(entry, orderedEntry{Key: "dev", Value: true})
+		entry = append(entry, orderedjson.Entry{Key: "dev", Value: true})
 	}
 	if node.Optional {
-		entry = append(entry, orderedEntry{Key: "optional", Value: true})
+		entry = append(entry, orderedjson.Entry{Key: "optional", Value: true})
 	}
 
 	// "requires" is a flat map of dependency name -> constraint.
@@ -96,14 +97,14 @@ func buildV1DepEntry(placed *PlacedNode) orderedMap {
 			requires[edge.Name] = edge.Constraint
 		}
 		if len(requires) > 0 {
-			entry = append(entry, orderedEntry{Key: "requires", Value: sortedStringMap(requires)})
+			entry = append(entry, orderedjson.Entry{Key: "requires", Value: orderedjson.FromStringMap(requires)})
 		}
 	}
 
 	// Nested dependencies (children that couldn't be hoisted).
 	nestedDeps := buildV1Dependencies(placed)
 	if nestedDeps != nil {
-		entry = append(entry, orderedEntry{Key: "dependencies", Value: nestedDeps})
+		entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: nestedDeps})
 	}
 
 	return entry

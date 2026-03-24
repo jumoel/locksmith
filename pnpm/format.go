@@ -75,32 +75,18 @@ func (f *PnpmLockV9Formatter) FormatFromResult(result *ResolveResult, project *e
 func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
-	// Group by dep type.
-	deps := make(map[string]ecosystem.DeclaredDep)
-	devDeps := make(map[string]ecosystem.DeclaredDep)
-	optDeps := make(map[string]ecosystem.DeclaredDep)
+	g := ecosystem.GroupDependenciesByType(project.Dependencies)
 
-	for _, d := range project.Dependencies {
-		switch d.Type {
-		case ecosystem.DepRegular:
-			deps[d.Name] = d
-		case ecosystem.DepDev:
-			devDeps[d.Name] = d
-		case ecosystem.DepOptional:
-			optDeps[d.Name] = d
-		}
-	}
-
-	if len(deps) > 0 {
-		depsNode := buildImporterDeps(deps, result)
+	if len(g.Regular) > 0 {
+		depsNode := buildImporterDeps(g.Regular, result)
 		addMapping(node, "dependencies", depsNode)
 	}
-	if len(devDeps) > 0 {
-		devNode := buildImporterDeps(devDeps, result)
+	if len(g.Dev) > 0 {
+		devNode := buildImporterDeps(g.Dev, result)
 		addMapping(node, "devDependencies", devNode)
 	}
-	if len(optDeps) > 0 {
-		optNode := buildImporterDeps(optDeps, result)
+	if len(g.Optional) > 0 {
+		optNode := buildImporterDeps(g.Optional, result)
 		addMapping(node, "optionalDependencies", optNode)
 	}
 
@@ -108,7 +94,8 @@ func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult) *yaml.
 }
 
 // buildImporterDeps constructs a dependency group within an importer entry.
-func buildImporterDeps(deps map[string]ecosystem.DeclaredDep, result *ResolveResult) *yaml.Node {
+// The deps map is name -> constraint (specifier from package.json).
+func buildImporterDeps(deps map[string]string, result *ResolveResult) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
 	// Build a lookup from dep name to the resolved version via root edges.
@@ -130,11 +117,11 @@ func buildImporterDeps(deps map[string]ecosystem.DeclaredDep, result *ResolveRes
 	sort.Strings(names)
 
 	for _, name := range names {
-		dep := deps[name]
+		constraint := deps[name]
 		resolvedVersion := rootVersions[name]
 
 		depNode := &yaml.Node{Kind: yaml.MappingNode}
-		addMapping(depNode, "specifier", scalarNode(dep.Constraint, 0))
+		addMapping(depNode, "specifier", scalarNode(constraint, 0))
 		addMapping(depNode, "version", scalarNode(resolvedVersion, 0))
 		addMapping(node, name, depNode)
 	}
@@ -413,20 +400,10 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 
 	// Group declared deps by type.
-	deps := make(map[string]ecosystem.DeclaredDep)
-	devDeps := make(map[string]ecosystem.DeclaredDep)
-	optDeps := make(map[string]ecosystem.DeclaredDep)
-
-	for _, d := range project.Dependencies {
-		switch d.Type {
-		case ecosystem.DepRegular:
-			deps[d.Name] = d
-		case ecosystem.DepDev:
-			devDeps[d.Name] = d
-		case ecosystem.DepOptional:
-			optDeps[d.Name] = d
-		}
-	}
+	g := ecosystem.GroupDependenciesByType(project.Dependencies)
+	deps := g.Regular
+	devDeps := g.Dev
+	optDeps := g.Optional
 
 	// specifiers: map of all dep names to their constraint from package.json.
 	allDeps := make(map[string]string)

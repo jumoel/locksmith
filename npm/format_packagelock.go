@@ -7,46 +7,8 @@ import (
 	"sort"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/orderedjson"
 )
-
-// orderedEntry is a single key-value pair in an ordered JSON object.
-type orderedEntry struct {
-	Key   string
-	Value interface{}
-}
-
-// orderedMap is a JSON-serializable ordered key-value list that preserves
-// insertion order when marshaled, unlike Go's built-in map type.
-type orderedMap []orderedEntry
-
-func (om orderedMap) MarshalJSON() ([]byte, error) {
-	var buf bytes.Buffer
-	buf.WriteByte('{')
-	for i, entry := range om {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-		key, err := json.Marshal(entry.Key)
-		if err != nil {
-			return nil, err
-		}
-		buf.Write(key)
-		buf.WriteByte(':')
-		// Use an encoder with SetEscapeHTML(false) to avoid escaping
-		// characters like > and < in engine constraints.
-		var valBuf bytes.Buffer
-		enc := json.NewEncoder(&valBuf)
-		enc.SetEscapeHTML(false)
-		if err := enc.Encode(entry.Value); err != nil {
-			return nil, err
-		}
-		// Encoder.Encode appends a newline, trim it.
-		b := valBuf.Bytes()
-		buf.Write(bytes.TrimRight(b, "\n"))
-	}
-	buf.WriteByte('}')
-	return buf.Bytes(), nil
-}
 
 // PackageLockV3Formatter produces package-lock.json lockfileVersion 3 output.
 // The same format is used for npm-shrinkwrap.json - the only difference is the
@@ -69,7 +31,7 @@ func (f *PackageLockV3Formatter) Format(graph *ecosystem.Graph, project *ecosyst
 // Output is deterministic: all map keys are sorted alphabetically.
 func (f *PackageLockV3Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	// Build the packages map entries.
-	packages := make(map[string]orderedMap, len(result.PlacedNodes)+1)
+	packages := make(map[string]orderedjson.Map, len(result.PlacedNodes)+1)
 
 	// Root entry.
 	packages[""] = buildRootEntry(project)
@@ -80,12 +42,12 @@ func (f *PackageLockV3Formatter) FormatFromResult(result *ResolveResult, project
 	}
 
 	// Top-level lockfile structure with deterministic key order.
-	lockfile := orderedMap{
+	lockfile := orderedjson.Map{
 		{Key: "name", Value: project.Name},
 		{Key: "version", Value: project.Version},
 		{Key: "lockfileVersion", Value: 3},
 		{Key: "requires", Value: true},
-		{Key: "packages", Value: buildOrderedPackages(packages)},
+		{Key: "packages", Value: orderedjson.FromStringMapSorted(packages)},
 	}
 
 	var buf bytes.Buffer
@@ -100,42 +62,26 @@ func (f *PackageLockV3Formatter) FormatFromResult(result *ResolveResult, project
 }
 
 // buildRootEntry constructs the root package entry (key "") from the project spec.
-func buildRootEntry(project *ecosystem.ProjectSpec) orderedMap {
-	entry := orderedMap{
+func buildRootEntry(project *ecosystem.ProjectSpec) orderedjson.Map {
+	entry := orderedjson.Map{
 		{Key: "name", Value: project.Name},
 		{Key: "version", Value: project.Version},
 	}
 
 	// Group declared dependencies by type.
-	deps := make(map[string]string)
-	devDeps := make(map[string]string)
-	optDeps := make(map[string]string)
-	peerDeps := make(map[string]string)
+	g := ecosystem.GroupDependenciesByType(project.Dependencies)
 
-	for _, d := range project.Dependencies {
-		switch d.Type {
-		case ecosystem.DepRegular:
-			deps[d.Name] = d.Constraint
-		case ecosystem.DepDev:
-			devDeps[d.Name] = d.Constraint
-		case ecosystem.DepOptional:
-			optDeps[d.Name] = d.Constraint
-		case ecosystem.DepPeer:
-			peerDeps[d.Name] = d.Constraint
-		}
+	if len(g.Regular) > 0 {
+		entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: orderedjson.FromStringMap(g.Regular)})
 	}
-
-	if len(deps) > 0 {
-		entry = append(entry, orderedEntry{Key: "dependencies", Value: sortedStringMap(deps)})
+	if len(g.Dev) > 0 {
+		entry = append(entry, orderedjson.Entry{Key: "devDependencies", Value: orderedjson.FromStringMap(g.Dev)})
 	}
-	if len(devDeps) > 0 {
-		entry = append(entry, orderedEntry{Key: "devDependencies", Value: sortedStringMap(devDeps)})
+	if len(g.Optional) > 0 {
+		entry = append(entry, orderedjson.Entry{Key: "optionalDependencies", Value: orderedjson.FromStringMap(g.Optional)})
 	}
-	if len(optDeps) > 0 {
-		entry = append(entry, orderedEntry{Key: "optionalDependencies", Value: sortedStringMap(optDeps)})
-	}
-	if len(peerDeps) > 0 {
-		entry = append(entry, orderedEntry{Key: "peerDependencies", Value: sortedStringMap(peerDeps)})
+	if len(g.Peer) > 0 {
+		entry = append(entry, orderedjson.Entry{Key: "peerDependencies", Value: orderedjson.FromStringMap(g.Peer)})
 	}
 
 	return entry
@@ -146,30 +92,30 @@ func buildRootEntry(project *ecosystem.ProjectSpec) orderedMap {
 // version, resolved, integrity, dev, optional, hasInstallScript, license,
 // dependencies, optionalDependencies, peerDependencies, peerDependenciesMeta,
 // bin, engines, os, cpu, funding, deprecated.
-func buildPackageEntry(node *ecosystem.Node) orderedMap {
-	entry := orderedMap{
+func buildPackageEntry(node *ecosystem.Node) orderedjson.Map {
+	entry := orderedjson.Map{
 		{Key: "version", Value: node.Version},
 		{Key: "resolved", Value: node.TarballURL},
 		{Key: "integrity", Value: node.Integrity},
 	}
 
 	if node.DevOnly {
-		entry = append(entry, orderedEntry{Key: "dev", Value: true})
+		entry = append(entry, orderedjson.Entry{Key: "dev", Value: true})
 	}
 	if node.Optional {
-		entry = append(entry, orderedEntry{Key: "optional", Value: true})
+		entry = append(entry, orderedjson.Entry{Key: "optional", Value: true})
 	}
 	if node.HasInstallScript {
-		entry = append(entry, orderedEntry{Key: "hasInstallScript", Value: true})
+		entry = append(entry, orderedjson.Entry{Key: "hasInstallScript", Value: true})
 	}
 	if node.Deprecated != "" {
-		entry = append(entry, orderedEntry{Key: "deprecated", Value: node.Deprecated})
+		entry = append(entry, orderedjson.Entry{Key: "deprecated", Value: node.Deprecated})
 	}
 	if node.Funding != nil {
-		entry = append(entry, orderedEntry{Key: "funding", Value: normalizeFunding(node.Funding)})
+		entry = append(entry, orderedjson.Entry{Key: "funding", Value: normalizeFunding(node.Funding)})
 	}
 	if node.License != "" {
-		entry = append(entry, orderedEntry{Key: "license", Value: node.License})
+		entry = append(entry, orderedjson.Entry{Key: "license", Value: node.License})
 	}
 
 	// Collect dependency constraints grouped by type.
@@ -187,18 +133,18 @@ func buildPackageEntry(node *ecosystem.Node) orderedMap {
 		}
 
 		if len(regularDeps) > 0 {
-			entry = append(entry, orderedEntry{Key: "dependencies", Value: sortedStringMap(regularDeps)})
+			entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: orderedjson.FromStringMap(regularDeps)})
 		}
 		if len(optionalDeps) > 0 {
-			entry = append(entry, orderedEntry{Key: "optionalDependencies", Value: sortedStringMap(optionalDeps)})
+			entry = append(entry, orderedjson.Entry{Key: "optionalDependencies", Value: orderedjson.FromStringMap(optionalDeps)})
 		}
 	}
 
 	if len(node.PeerDeps) > 0 {
-		entry = append(entry, orderedEntry{Key: "peerDependencies", Value: sortedStringMap(node.PeerDeps)})
+		entry = append(entry, orderedjson.Entry{Key: "peerDependencies", Value: orderedjson.FromStringMap(node.PeerDeps)})
 	}
 	if len(node.PeerDepsMeta) > 0 {
-		peerMeta := make(orderedMap, 0, len(node.PeerDepsMeta))
+		peerMeta := make(orderedjson.Map, 0, len(node.PeerDepsMeta))
 		peerNames := make([]string, 0, len(node.PeerDepsMeta))
 		for name := range node.PeerDepsMeta {
 			peerNames = append(peerNames, name)
@@ -206,45 +152,29 @@ func buildPackageEntry(node *ecosystem.Node) orderedMap {
 		sort.Strings(peerNames)
 		for _, name := range peerNames {
 			pm := node.PeerDepsMeta[name]
-			metaObj := orderedMap{}
+			metaObj := orderedjson.Map{}
 			if pm.Optional {
-				metaObj = append(metaObj, orderedEntry{Key: "optional", Value: true})
+				metaObj = append(metaObj, orderedjson.Entry{Key: "optional", Value: true})
 			}
-			peerMeta = append(peerMeta, orderedEntry{Key: name, Value: metaObj})
+			peerMeta = append(peerMeta, orderedjson.Entry{Key: name, Value: metaObj})
 		}
-		entry = append(entry, orderedEntry{Key: "peerDependenciesMeta", Value: peerMeta})
+		entry = append(entry, orderedjson.Entry{Key: "peerDependenciesMeta", Value: peerMeta})
 	}
 
 	if len(node.Bin) > 0 {
-		entry = append(entry, orderedEntry{Key: "bin", Value: sortedStringMap(node.Bin)})
+		entry = append(entry, orderedjson.Entry{Key: "bin", Value: orderedjson.FromStringMap(node.Bin)})
 	}
 	if len(node.Engines) > 0 {
-		entry = append(entry, orderedEntry{Key: "engines", Value: sortedStringMap(node.Engines)})
+		entry = append(entry, orderedjson.Entry{Key: "engines", Value: orderedjson.FromStringMap(node.Engines)})
 	}
 	if len(node.OS) > 0 {
-		entry = append(entry, orderedEntry{Key: "os", Value: node.OS})
+		entry = append(entry, orderedjson.Entry{Key: "os", Value: node.OS})
 	}
 	if len(node.CPU) > 0 {
-		entry = append(entry, orderedEntry{Key: "cpu", Value: node.CPU})
+		entry = append(entry, orderedjson.Entry{Key: "cpu", Value: node.CPU})
 	}
 
 	return entry
-}
-
-// sortedStringMap converts a map[string]string to an orderedMap with
-// alphabetically sorted keys.
-func sortedStringMap(m map[string]string) orderedMap {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	result := make(orderedMap, len(keys))
-	for i, k := range keys {
-		result[i] = orderedEntry{Key: k, Value: m[k]}
-	}
-	return result
 }
 
 // normalizeFunding converts funding to npm's canonical format.
@@ -253,7 +183,7 @@ func normalizeFunding(funding interface{}) interface{} {
 	switch v := funding.(type) {
 	case string:
 		if v != "" {
-			return orderedMap{{Key: "url", Value: v}}
+			return orderedjson.Map{{Key: "url", Value: v}}
 		}
 		return nil
 	case map[string]interface{}:
@@ -267,19 +197,3 @@ func normalizeFunding(funding interface{}) interface{} {
 	}
 }
 
-// buildOrderedPackages converts a packages map to an orderedMap with sorted paths.
-// The empty string key (root) sorts first alphabetically, which matches the npm
-// lockfile convention.
-func buildOrderedPackages(packages map[string]orderedMap) orderedMap {
-	keys := make([]string, 0, len(packages))
-	for k := range packages {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	result := make(orderedMap, len(keys))
-	for i, k := range keys {
-		result[i] = orderedEntry{Key: k, Value: packages[k]}
-	}
-	return result
-}
