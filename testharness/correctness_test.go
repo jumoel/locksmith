@@ -105,6 +105,16 @@ func TestCorrectness(t *testing.T) {
 		"mixed-large", "many-direct",
 	})
 
+	// Known incompatible combinations where the real PM can't generate a
+	// lockfile for the fixture (not a locksmith bug).
+	skipCombos := map[string]string{
+		// bun and pnpm@7 don't produce lockfiles for empty projects
+		"bun/zero-deps":       "bun deletes lockfile for empty projects",
+		"pnpm@7-v5/zero-deps": "pnpm@7 errors on empty projects",
+		// yarn@1 errors on optional deps that don't exist on the registry
+		"yarn@1/arborist-optional-missing": "yarn@1 errors on missing optional deps",
+	}
+
 	for _, cc := range correctnessMatrix {
 		cc := cc
 		// PM versions run sequentially to avoid spawning hundreds of
@@ -113,6 +123,9 @@ func TestCorrectness(t *testing.T) {
 			for _, fixture := range correctnessFixtures {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
+					if reason, skip := skipCombos[cc.PMLabel+"/"+fixture]; skip {
+						t.Skipf("known incompatibility: %s", reason)
+					}
 					t.Parallel()
 					compareResolution(t, cc, fixture)
 				})
