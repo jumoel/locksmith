@@ -30,27 +30,41 @@ type correctnessCase struct {
 }
 
 // correctnessMatrix defines all format/pm pairs for resolution comparison.
+// Each entry pairs a locksmith format with every real package manager version
+// that natively produces that format.
 var correctnessMatrix = []correctnessCase{
-	// npm: compare our package-lock-v3 against npm 7-11 output
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@7", []string{"run-npm", "7", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@8", []string{"run-npm", "8", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@9", []string{"run-npm", "9", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@10", []string{"run-npm", "10", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@11", []string{"run-npm", "11", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	// --- npm shrinkwrap v1: npm 2-5 (pre-package-lock era, uses npm install) ---
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@2-shrinkwrap", []string{"bash", "-c", "run-npm 2 install --ignore-scripts && run-npm 2 shrinkwrap"}, "npm-shrinkwrap.json", nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@3-shrinkwrap", []string{"bash", "-c", "run-npm 3 install --ignore-scripts && run-npm 3 shrinkwrap"}, "npm-shrinkwrap.json", nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@4-shrinkwrap", []string{"bash", "-c", "run-npm 4 install --ignore-scripts && run-npm 4 shrinkwrap"}, "npm-shrinkwrap.json", nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@5-shrinkwrap", []string{"bash", "-c", "run-npm 5 install --ignore-scripts && run-npm 5 shrinkwrap"}, "npm-shrinkwrap.json", nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@6-shrinkwrap", []string{"bash", "-c", "run-npm 6 install --ignore-scripts && run-npm 6 shrinkwrap"}, "npm-shrinkwrap.json", nil},
 
-	// npm shrinkwrap: compare against npm 6 output (need install first, then shrinkwrap)
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@6", []string{"bash", "-c", "run-npm 6 install --ignore-scripts && run-npm 6 shrinkwrap"}, "npm-shrinkwrap.json", nil},
+	// --- package-lock v1: npm 5 (native v1 producer) ---
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm@5-v1", []string{"run-npm", "5", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm@6-v1", []string{"run-npm", "6", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
 
-	// pnpm: compare against each pnpm version's native output
-	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@7", []string{"run-pnpm", "7", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
-	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
-	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
-	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
+	// --- package-lock v2: npm 7-8 (native v2 producers) ---
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm@7-v2", []string{"run-npm", "7", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm@8-v2", []string{"run-npm", "8", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
 
-	// yarn classic: compare against yarn 1 output
+	// --- package-lock v3: npm 7-11 (all understand v3) ---
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@7-v3", []string{"run-npm", "7", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@8-v3", []string{"run-npm", "8", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@9-v3", []string{"run-npm", "9", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@10-v3", []string{"run-npm", "10", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@11-v3", []string{"run-npm", "11", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+
+	// --- pnpm: each version with its native lockfile format ---
+	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@7-v5", []string{"run-pnpm", "7", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
+	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10-v9", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
+
+	// --- yarn classic ---
 	{locksmith.FormatYarnClassic, "yarn.lock", "yarn@1", []string{"run-yarn", "1", "install", "--ignore-scripts"}, "yarn.lock", nil},
 
-	// bun: compare against bun output
+	// --- bun ---
 	{locksmith.FormatBunLock, "bun.lock", "bun", []string{"bun", "install", "--save-text-lockfile"}, "bun.lock", nil},
 }
 
@@ -93,8 +107,9 @@ func TestCorrectness(t *testing.T) {
 
 	for _, cc := range correctnessMatrix {
 		cc := cc
+		// PM versions run sequentially to avoid spawning hundreds of
+		// Docker containers at once. Fixtures within each PM run in parallel.
 		t.Run(cc.PMLabel, func(t *testing.T) {
-			t.Parallel()
 			for _, fixture := range correctnessFixtures {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
