@@ -7,7 +7,9 @@ import (
 )
 
 // Resolver implements pnpm-style dependency resolution (strict, no hoisting).
-type Resolver struct{}
+type Resolver struct {
+	PolicyOverride *ecosystem.ResolverPolicy
+}
 
 // NewResolver returns a new pnpm dependency resolver.
 func NewResolver() *Resolver {
@@ -44,15 +46,20 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 	policy := ecosystem.ResolverPolicy{
 		CrossTreeDedup:   true,
 		AutoInstallPeers: true,
-		OnNodeResolved: func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
-			resolvedDeps := make(map[string]string)
-			for _, e := range edges {
-				if e.Target != nil {
-					resolvedDeps[e.Name] = e.Target.Version
-				}
+	}
+	if r.PolicyOverride != nil {
+		policy.CrossTreeDedup = r.PolicyOverride.CrossTreeDedup
+		policy.AutoInstallPeers = r.PolicyOverride.AutoInstallPeers
+		policy.StorePeerMetaOnNode = r.PolicyOverride.StorePeerMetaOnNode
+	}
+	policy.OnNodeResolved = func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
+		resolvedDeps := make(map[string]string)
+		for _, e := range edges {
+			if e.Target != nil {
+				resolvedDeps[e.Name] = e.Target.Version
 			}
-			packages[key] = &ResolvedPackage{Node: node, Dependencies: resolvedDeps}
-		},
+		}
+		packages[key] = &ResolvedPackage{Node: node, Dependencies: resolvedDeps}
 	}
 
 	graph, err := ecosystem.Resolve(ctx, project, registry, opts, policy)

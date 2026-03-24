@@ -1,6 +1,10 @@
 package locksmith
 
-import "time"
+import (
+	"time"
+
+	"github.com/jumoel/locksmith/ecosystem"
+)
 
 // OutputFormat identifies the lockfile format to generate.
 type OutputFormat string
@@ -56,4 +60,9 @@ type GenerateOptions struct {
 
 	// RegistryURL overrides the default registry for the ecosystem.
 	RegistryURL string
+
+	// PolicyOverride, if set, overrides the default ResolverPolicy for the
+	// chosen format. Use this to match the behavior of a specific package
+	// manager version (e.g., npm 5-6 which don't auto-install peers).
+	PolicyOverride *ecosystem.ResolverPolicy
 }

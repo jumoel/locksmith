@@ -50,6 +50,7 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	parser := npm.NewSpecParser()
 	registry := npm.NewRegistryClient(opts.RegistryURL)
 	resolver := npm.NewResolver()
+	resolver.PolicyOverride = opts.PolicyOverride
 
 	var formatter npmFormatter
 	switch opts.OutputFormat {
@@ -94,6 +95,7 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 	parser := npm.NewSpecParser()
 	registry := npm.NewRegistryClient(opts.RegistryURL)
 	resolver := pnpm.NewResolver()
+	resolver.PolicyOverride = opts.PolicyOverride
 
 	var formatter pnpmFormatter
 	switch opts.OutputFormat {

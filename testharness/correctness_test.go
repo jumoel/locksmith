@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/jumoel/locksmith"
+	"github.com/jumoel/locksmith/ecosystem"
 )
 
 // correctnessCase defines a locksmith format paired with the real package manager
@@ -27,45 +28,55 @@ type correctnessCase struct {
 	// RealLockFileName is the lockfile name the real PM produces (may differ).
 	RealLockFileName string
 	SetupFunc        func(t *testing.T, dir string)
+	// PolicyOverride overrides the default resolution policy for this PM version.
+	// e.g., npm 3-6 and pnpm 7 don't auto-install peer deps.
+	PolicyOverride *ecosystem.ResolverPolicy
+}
+
+// noPeerAutoInstall matches npm 3-6 and pnpm 7 behavior where peer deps
+// are NOT automatically installed.
+var noPeerAutoInstall = &ecosystem.ResolverPolicy{
+	CrossTreeDedup:   true,
+	AutoInstallPeers: false,
 }
 
 // correctnessMatrix defines all format/pm pairs for resolution comparison.
 // Each entry pairs a locksmith format with every real package manager version
 // that natively produces that format.
 var correctnessMatrix = []correctnessCase{
-	// --- npm shrinkwrap v1: npm 2-5 (pre-package-lock era, uses npm install) ---
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@2-shrinkwrap", []string{"bash", "-c", "run-npm 2 install --ignore-scripts && run-npm 2 shrinkwrap"}, "npm-shrinkwrap.json", nil},
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@3-shrinkwrap", []string{"bash", "-c", "run-npm 3 install --ignore-scripts && run-npm 3 shrinkwrap"}, "npm-shrinkwrap.json", nil},
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@4-shrinkwrap", []string{"bash", "-c", "run-npm 4 install --ignore-scripts && run-npm 4 shrinkwrap"}, "npm-shrinkwrap.json", nil},
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@5-shrinkwrap", []string{"bash", "-c", "run-npm 5 install --ignore-scripts && run-npm 5 shrinkwrap"}, "npm-shrinkwrap.json", nil},
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@6-shrinkwrap", []string{"bash", "-c", "run-npm 6 install --ignore-scripts && run-npm 6 shrinkwrap"}, "npm-shrinkwrap.json", nil},
+	// --- npm shrinkwrap v1: npm 2-6 (no peer auto-install) ---
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@2-shrinkwrap", []string{"bash", "-c", "run-npm 2 install --ignore-scripts && run-npm 2 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@3-shrinkwrap", []string{"bash", "-c", "run-npm 3 install --ignore-scripts && run-npm 3 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@4-shrinkwrap", []string{"bash", "-c", "run-npm 4 install --ignore-scripts && run-npm 4 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@5-shrinkwrap", []string{"bash", "-c", "run-npm 5 install --ignore-scripts && run-npm 5 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@6-shrinkwrap", []string{"bash", "-c", "run-npm 6 install --ignore-scripts && run-npm 6 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
 
-	// --- package-lock v1: npm 5 (native v1 producer) ---
-	{locksmith.FormatPackageLockV1, "package-lock.json", "npm@5-v1", []string{"run-npm", "5", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV1, "package-lock.json", "npm@6-v1", []string{"run-npm", "6", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	// --- package-lock v1: npm 5-6 (no peer auto-install) ---
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm@5-v1", []string{"run-npm", "5", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, noPeerAutoInstall},
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm@6-v1", []string{"run-npm", "6", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, noPeerAutoInstall},
 
 	// --- package-lock v2: npm 7-8 (native v2 producers) ---
-	{locksmith.FormatPackageLockV2, "package-lock.json", "npm@7-v2", []string{"run-npm", "7", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV2, "package-lock.json", "npm@8-v2", []string{"run-npm", "8", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm@7-v2", []string{"run-npm", "7", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, nil},
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm@8-v2", []string{"run-npm", "8", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, nil},
 
 	// --- package-lock v3: npm 7-11 (all understand v3) ---
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@7-v3", []string{"run-npm", "7", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@8-v3", []string{"run-npm", "8", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@9-v3", []string{"run-npm", "9", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@10-v3", []string{"run-npm", "10", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
-	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@11-v3", []string{"run-npm", "11", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@7-v3", []string{"run-npm", "7", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@8-v3", []string{"run-npm", "8", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@9-v3", []string{"run-npm", "9", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@10-v3", []string{"run-npm", "10", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@11-v3", []string{"run-npm", "11", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, nil},
 
 	// --- pnpm: each version with its native lockfile format ---
-	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@7-v5", []string{"run-pnpm", "7", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
-	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
-	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
-	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10-v9", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
+	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@7-v5", []string{"run-pnpm", "7", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
+	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10-v9", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 
 	// --- yarn classic ---
-	{locksmith.FormatYarnClassic, "yarn.lock", "yarn@1", []string{"run-yarn", "1", "install", "--ignore-scripts"}, "yarn.lock", nil},
+	{locksmith.FormatYarnClassic, "yarn.lock", "yarn@1", []string{"run-yarn", "1", "install", "--ignore-scripts"}, "yarn.lock", nil, nil},
 
 	// --- bun ---
-	{locksmith.FormatBunLock, "bun.lock", "bun", []string{"bun", "install", "--save-text-lockfile"}, "bun.lock", nil},
+	{locksmith.FormatBunLock, "bun.lock", "bun", []string{"bun", "install", "--save-text-lockfile"}, "bun.lock", nil, nil},
 }
 
 // TestCorrectness generates lockfiles with BOTH locksmith and the real package
@@ -113,9 +124,7 @@ func TestCorrectness(t *testing.T) {
 		"pnpm@7-v5/zero-deps": "pnpm@7 errors on empty projects",
 		// yarn@1 errors on optional deps that don't exist on the registry
 		"yarn@1/arborist-optional-missing": "yarn@1 errors on missing optional deps",
-		// pnpm@7 has autoInstallPeers=false by default (changed in pnpm 8)
-		"pnpm@7-v5/arborist-peer-cycle": "pnpm@7 does not auto-install peers by default",
-		"pnpm@7-v5/peer-chain":          "pnpm@7 does not auto-install peers by default",
+		// pnpm@7 peer behavior is handled via PolicyOverride (noPeerAutoInstall)
 	}
 
 	// npm 2-4 shrinkwrap excludes devDependencies. Skip only fixtures that
@@ -172,11 +181,12 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 		t.Fatalf("reading fixture %s: %v", fixture, err)
 	}
 
-	// Step 1: Generate with locksmith
+	// Step 1: Generate with locksmith using the PM-version-specific policy.
 	ctx := context.Background()
 	result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
-		SpecFile:     specData,
-		OutputFormat: cc.Format,
+		SpecFile:       specData,
+		OutputFormat:   cc.Format,
+		PolicyOverride: cc.PolicyOverride,
 	})
 	if err != nil {
 		t.Fatalf("locksmith Generate failed: %v", err)

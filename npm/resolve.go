@@ -8,7 +8,10 @@ import (
 )
 
 // Resolver implements npm-style dependency resolution with hoisting.
-type Resolver struct{}
+type Resolver struct {
+	// PolicyOverride, if set, overrides the default resolution policy.
+	PolicyOverride *ecosystem.ResolverPolicy
+}
 
 // NewResolver returns a new npm dependency resolver.
 func NewResolver() *Resolver {
@@ -47,6 +50,9 @@ func (r *Resolver) ResolveWithPlacement(ctx context.Context, project *ecosystem.
 		CrossTreeDedup:      true,
 		AutoInstallPeers:    true,
 		StorePeerMetaOnNode: true,
+	}
+	if r.PolicyOverride != nil {
+		policy = *r.PolicyOverride
 	}
 
 	graph, err := ecosystem.Resolve(ctx, project, registry, opts, policy)
