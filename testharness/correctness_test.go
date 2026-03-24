@@ -118,17 +118,16 @@ func TestCorrectness(t *testing.T) {
 		"pnpm@7-v5/peer-chain":          "pnpm@7 does not auto-install peers by default",
 	}
 
-	// npm 2-4 shrinkwrap excludes devDependencies and has a fundamentally
-	// different resolution algorithm. Skip complex fixtures that exercise
-	// features these ancient versions don't support.
-	npm234Fixtures := []string{
-		"dev-deps", "arborist-dev-deps", "arborist-dedupe",
-		"typescript-4", "typescript-5", "mixed-large", "monorepo-tools",
-		"cli-tools", "peer-deps", "peer-chain", "next-12", "next-13",
+	// npm 2-4 shrinkwrap excludes devDependencies. Skip only fixtures that
+	// have devDependencies or exercise features not available in npm 2-4.
+	npm234DevDepFixtures := []string{
+		"dev-deps", "arborist-dev-deps", // explicit devDependencies
+		"typescript-4", "typescript-5",  // devDependencies only
+		"mixed-large", "monorepo-tools", // have devDependencies
 	}
 	for _, pm := range []string{"npm@2-shrinkwrap", "npm@3-shrinkwrap", "npm@4-shrinkwrap"} {
-		for _, f := range npm234Fixtures {
-			skipCombos[pm+"/"+f] = "npm 2-4 shrinkwrap excludes devDeps and has different resolution"
+		for _, f := range npm234DevDepFixtures {
+			skipCombos[pm+"/"+f] = "npm 2-4 shrinkwrap excludes devDependencies"
 		}
 	}
 
