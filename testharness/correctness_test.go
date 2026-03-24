@@ -38,8 +38,8 @@ var correctnessMatrix = []correctnessCase{
 	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@10", []string{"run-npm", "10", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
 	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@11", []string{"run-npm", "11", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil},
 
-	// npm shrinkwrap: compare against npm 6 output
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@6", []string{"run-npm", "6", "shrinkwrap"}, "npm-shrinkwrap.json", nil},
+	// npm shrinkwrap: compare against npm 6 output (need install first, then shrinkwrap)
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@6", []string{"bash", "-c", "run-npm 6 install --ignore-scripts && run-npm 6 shrinkwrap"}, "npm-shrinkwrap.json", nil},
 
 	// pnpm: compare against each pnpm version's native output
 	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@7", []string{"run-pnpm", "7", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil},
@@ -184,13 +184,38 @@ func extractVersions(t *testing.T, data []byte, filename string) []string {
 	}
 }
 
+// stripJSONCCommas strips trailing commas from JSONC to make it valid JSON.
+func stripJSONCCommas(data []byte) []byte {
+	s := string(data)
+	// Remove trailing commas before } or ]
+	// This is a rough approach but works for bun.lock format
+	var result strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			// Look ahead for only whitespace then } or ]
+			j := i + 1
+			for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r') {
+				j++
+			}
+			if j < len(s) && (s[j] == '}' || s[j] == ']') {
+				continue // skip the trailing comma
+			}
+		}
+		result.WriteByte(s[i])
+	}
+	return []byte(result.String())
+}
+
 func extractVersionsJSON(t *testing.T, data []byte) []string {
 	t.Helper()
 
 	var parsed map[string]interface{}
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		// Might be bun.lock - try it
-		return nil
+		// Try stripping JSONC trailing commas (bun.lock)
+		cleaned := stripJSONCCommas(data)
+		if err2 := json.Unmarshal(cleaned, &parsed); err2 != nil {
+			return nil
+		}
 	}
 
 	var versions []string
