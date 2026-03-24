@@ -32,6 +32,14 @@ type Node struct {
 	Bin              map[string]string
 	License          string
 	Deprecated       string
+	// PeerDeps maps peer dependency names to version constraints.
+	// These are declared by the package but not automatically installed.
+	PeerDeps map[string]string
+	// PeerDepsMeta holds metadata about peer dependencies (e.g., optional flag).
+	PeerDepsMeta map[string]PeerDepMeta
+	// Funding holds funding information for the package.
+	// Can be a URL string or a structured object (stored as raw JSON).
+	Funding interface{}
 }
 
 // Edge represents a dependency relationship.

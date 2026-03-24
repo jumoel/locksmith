@@ -78,6 +78,7 @@ type Version struct {
 	Bin                  json.RawMessage         `json:"bin,omitempty"`
 	License              LicenseField            `json:"license,omitempty"`
 	Deprecated           FlexString              `json:"deprecated,omitempty"`
+	Funding              json.RawMessage         `json:"funding,omitempty"`
 }
 
 // HasInstallScript returns true if the version has preinstall, install, or postinstall scripts.

@@ -31,6 +31,7 @@ type VersionMetadata struct {
 	Bin              map[string]string
 	License          string
 	Deprecated       string
+	Funding          interface{} // URL string or structured object
 }
 
 // PeerDepMeta holds metadata about a peer dependency.

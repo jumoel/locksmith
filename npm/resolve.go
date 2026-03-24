@@ -197,6 +197,9 @@ func (r *resolver) resolveDep(graph *ecosystem.Graph, name, constraint string, d
 		Bin:              meta.Bin,
 		License:          meta.License,
 		Deprecated:       meta.Deprecated,
+		PeerDeps:         meta.PeerDeps,
+		PeerDepsMeta:     meta.PeerDepsMeta,
+		Funding:          meta.Funding,
 	}
 
 	if depType == ecosystem.DepDev {

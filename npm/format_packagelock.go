@@ -142,8 +142,10 @@ func buildRootEntry(project *ecosystem.ProjectSpec) orderedMap {
 }
 
 // buildPackageEntry constructs a non-root package entry from a resolved node.
-// Field order matches npm's output: version, resolved, integrity, dev, optional,
-// hasInstallScript, license, bin, dependencies, optionalDependencies, engines, os, cpu, deprecated.
+// Field order matches npm's Arborist output:
+// version, resolved, integrity, dev, optional, hasInstallScript, license,
+// dependencies, optionalDependencies, peerDependencies, peerDependenciesMeta,
+// bin, engines, os, cpu, funding, deprecated.
 func buildPackageEntry(node *ecosystem.Node) orderedMap {
 	entry := orderedMap{
 		{Key: "version", Value: node.Version},
@@ -160,11 +162,14 @@ func buildPackageEntry(node *ecosystem.Node) orderedMap {
 	if node.HasInstallScript {
 		entry = append(entry, orderedEntry{Key: "hasInstallScript", Value: true})
 	}
+	if node.Deprecated != "" {
+		entry = append(entry, orderedEntry{Key: "deprecated", Value: node.Deprecated})
+	}
+	if node.Funding != nil {
+		entry = append(entry, orderedEntry{Key: "funding", Value: normalizeFunding(node.Funding)})
+	}
 	if node.License != "" {
 		entry = append(entry, orderedEntry{Key: "license", Value: node.License})
-	}
-	if len(node.Bin) > 0 {
-		entry = append(entry, orderedEntry{Key: "bin", Value: sortedStringMap(node.Bin)})
 	}
 
 	// Collect dependency constraints grouped by type.
@@ -189,6 +194,30 @@ func buildPackageEntry(node *ecosystem.Node) orderedMap {
 		}
 	}
 
+	if len(node.PeerDeps) > 0 {
+		entry = append(entry, orderedEntry{Key: "peerDependencies", Value: sortedStringMap(node.PeerDeps)})
+	}
+	if len(node.PeerDepsMeta) > 0 {
+		peerMeta := make(orderedMap, 0, len(node.PeerDepsMeta))
+		peerNames := make([]string, 0, len(node.PeerDepsMeta))
+		for name := range node.PeerDepsMeta {
+			peerNames = append(peerNames, name)
+		}
+		sort.Strings(peerNames)
+		for _, name := range peerNames {
+			pm := node.PeerDepsMeta[name]
+			metaObj := orderedMap{}
+			if pm.Optional {
+				metaObj = append(metaObj, orderedEntry{Key: "optional", Value: true})
+			}
+			peerMeta = append(peerMeta, orderedEntry{Key: name, Value: metaObj})
+		}
+		entry = append(entry, orderedEntry{Key: "peerDependenciesMeta", Value: peerMeta})
+	}
+
+	if len(node.Bin) > 0 {
+		entry = append(entry, orderedEntry{Key: "bin", Value: sortedStringMap(node.Bin)})
+	}
 	if len(node.Engines) > 0 {
 		entry = append(entry, orderedEntry{Key: "engines", Value: sortedStringMap(node.Engines)})
 	}
@@ -197,9 +226,6 @@ func buildPackageEntry(node *ecosystem.Node) orderedMap {
 	}
 	if len(node.CPU) > 0 {
 		entry = append(entry, orderedEntry{Key: "cpu", Value: node.CPU})
-	}
-	if node.Deprecated != "" {
-		entry = append(entry, orderedEntry{Key: "deprecated", Value: node.Deprecated})
 	}
 
 	return entry
@@ -219,6 +245,26 @@ func sortedStringMap(m map[string]string) orderedMap {
 		result[i] = orderedEntry{Key: k, Value: m[k]}
 	}
 	return result
+}
+
+// normalizeFunding converts funding to npm's canonical format.
+// npm normalizes string URLs to {"url": "..."} objects.
+func normalizeFunding(funding interface{}) interface{} {
+	switch v := funding.(type) {
+	case string:
+		if v != "" {
+			return orderedMap{{Key: "url", Value: v}}
+		}
+		return nil
+	case map[string]interface{}:
+		// Already an object, pass through
+		return v
+	case []interface{}:
+		// Array of funding objects, pass through
+		return v
+	default:
+		return funding
+	}
 }
 
 // buildOrderedPackages converts a packages map to an orderedMap with sorted paths.

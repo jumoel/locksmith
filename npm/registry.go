@@ -141,6 +141,14 @@ func (r *RegistryClient) FetchMetadata(ctx context.Context, name string, version
 		Deprecated:       string(v.Deprecated),
 	}
 
+	// Parse funding (can be string, object, or array)
+	if v.Funding != nil {
+		var funding interface{}
+		if err := json.Unmarshal(v.Funding, &funding); err == nil {
+			meta.Funding = funding
+		}
+	}
+
 	// Convert peer deps meta
 	if v.PeerDependenciesMeta != nil {
 		meta.PeerDepsMeta = make(map[string]ecosystem.PeerDepMeta)
