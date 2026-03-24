@@ -127,14 +127,17 @@ func (r *bunResolver) resolveDep(graph *ecosystem.Graph, name, constraint string
 		versionMap[v.String()] = vi.Version
 	}
 
-	// Cross-tree dedup: reuse an already-resolved version if it satisfies.
-	for key, node := range r.nodes {
-		if !strings.HasPrefix(key, name+"@") {
-			continue
-		}
-		existingVer, err := semver.Parse(node.Version)
-		if err == nil && c.Check(existingVer) {
-			return node, nil
+	// Cross-tree dedup for transitive deps: bun deduplicates to one version
+	// per package name. Root deps get fresh resolution.
+	if !r.projectDeps[name] {
+		for key, node := range r.nodes {
+			if !strings.HasPrefix(key, name+"@") {
+				continue
+			}
+			existingVer, err := semver.Parse(node.Version)
+			if err == nil && c.Check(existingVer) {
+				return node, nil
+			}
 		}
 	}
 

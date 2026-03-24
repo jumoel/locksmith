@@ -132,14 +132,17 @@ func (r *pnpmResolver) resolveDep(graph *ecosystem.Graph, name, constraint strin
 		versionMap[v.String()] = vi.Version
 	}
 
-	// Cross-tree dedup: reuse an already-resolved version if it satisfies.
-	for key, node := range r.nodes {
-		if !strings.HasPrefix(key, name+"@") {
-			continue
-		}
-		existingVer, err := semver.Parse(node.Version)
-		if err == nil && c.Check(existingVer) {
-			return node, nil
+	// Cross-tree dedup for transitive deps: reuse an already-resolved version
+	// if it satisfies. Root deps get fresh resolution.
+	if !r.projectDeps[name] {
+		for key, node := range r.nodes {
+			if !strings.HasPrefix(key, name+"@") {
+				continue
+			}
+			existingVer, err := semver.Parse(node.Version)
+			if err == nil && c.Check(existingVer) {
+				return node, nil
+			}
 		}
 	}
 
