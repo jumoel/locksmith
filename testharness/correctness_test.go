@@ -132,9 +132,6 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 		t.Fatalf("locksmith Generate failed: %v", err)
 	}
 
-	// Extract resolved versions from locksmith output
-	locksmith_versions := extractVersions(t, result.Lockfile, cc.LockFileName)
-
 	// Step 2: Generate with real package manager in Docker
 	realDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(realDir, "package.json"), specData, 0o644); err != nil {
