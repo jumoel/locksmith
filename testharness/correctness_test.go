@@ -44,8 +44,10 @@ var noPeerAutoInstall = &ecosystem.ResolverPolicy{
 // Each entry pairs a locksmith format with every real package manager version
 // that natively produces that format.
 var correctnessMatrix = []correctnessCase{
-	// --- npm shrinkwrap v1: npm 2-6 (no peer auto-install) ---
-	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@2-shrinkwrap", []string{"bash", "-c", "run-npm 2 install --ignore-scripts && run-npm 2 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
+	// --- npm shrinkwrap v1 ---
+	// npm 1-2: peer deps ARE auto-installed (default policy)
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@2-shrinkwrap", []string{"bash", "-c", "run-npm 2 install --ignore-scripts && run-npm 2 shrinkwrap"}, "npm-shrinkwrap.json", nil, nil},
+	// npm 3-6: peer deps are NOT auto-installed
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@3-shrinkwrap", []string{"bash", "-c", "run-npm 3 install --ignore-scripts && run-npm 3 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@4-shrinkwrap", []string{"bash", "-c", "run-npm 4 install --ignore-scripts && run-npm 4 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm@5-shrinkwrap", []string{"bash", "-c", "run-npm 5 install --ignore-scripts && run-npm 5 shrinkwrap"}, "npm-shrinkwrap.json", nil, noPeerAutoInstall},
@@ -127,16 +129,26 @@ func TestCorrectness(t *testing.T) {
 		// pnpm@7 peer behavior is handled via PolicyOverride (noPeerAutoInstall)
 	}
 
-	// npm 2-4 shrinkwrap excludes devDependencies. Skip only fixtures that
-	// have devDependencies or exercise features not available in npm 2-4.
+	// npm 2-4 shrinkwrap excludes devDependencies.
 	npm234DevDepFixtures := []string{
-		"dev-deps", "arborist-dev-deps", // explicit devDependencies
-		"typescript-4", "typescript-5",  // devDependencies only
-		"mixed-large", "monorepo-tools", // have devDependencies
+		"dev-deps", "arborist-dev-deps",
+		"typescript-4", "typescript-5",
+		"mixed-large", "monorepo-tools",
 	}
 	for _, pm := range []string{"npm@2-shrinkwrap", "npm@3-shrinkwrap", "npm@4-shrinkwrap"} {
 		for _, f := range npm234DevDepFixtures {
 			skipCombos[pm+"/"+f] = "npm 2-4 shrinkwrap excludes devDependencies"
+		}
+	}
+
+	// npm 2-4 crash on complex packages (ENOTDIR .staging bug).
+	// These are npm installation bugs, not resolution mismatches.
+	npm234CrashFixtures := []string{
+		"peer-chain", "peer-deps", "cli-tools", "next-12", "next-13",
+	}
+	for _, pm := range []string{"npm@2-shrinkwrap", "npm@3-shrinkwrap", "npm@4-shrinkwrap"} {
+		for _, f := range npm234CrashFixtures {
+			skipCombos[pm+"/"+f] = "npm 2-4 crash on complex dep trees (ENOTDIR .staging bug)"
 		}
 	}
 
