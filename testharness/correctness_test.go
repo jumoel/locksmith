@@ -141,16 +141,20 @@ func TestCorrectness(t *testing.T) {
 		}
 	}
 
-	// npm 2-4 crash on complex packages (ENOTDIR .staging bug).
-	// These are npm installation bugs, not resolution mismatches.
+	// npm 2-4 crash on complex packages (ENOTDIR .staging bug) or
+	// can't handle circular peer deps (npm@3-4).
 	npm234CrashFixtures := []string{
 		"peer-chain", "peer-deps", "cli-tools", "next-12", "next-13",
+		"arborist-peer-cycle", // npm@3-4 error on circular peer deps
 	}
-	for _, pm := range []string{"npm@2-shrinkwrap", "npm@3-shrinkwrap", "npm@4-shrinkwrap"} {
-		for _, f := range npm234CrashFixtures {
-			skipCombos[pm+"/"+f] = "npm 2-4 crash on complex dep trees (ENOTDIR .staging bug)"
-		}
+	// npm@2 crashes on large trees, npm@3-4 crash on both large trees and circular peers
+	for _, f := range npm234CrashFixtures {
+		skipCombos["npm@2-shrinkwrap/"+f] = "npm@2 crashes on complex dep trees"
+		skipCombos["npm@3-shrinkwrap/"+f] = "npm@3 crashes on complex dep trees or circular peers"
+		skipCombos["npm@4-shrinkwrap/"+f] = "npm@4 crashes on complex dep trees or circular peers"
 	}
+	// npm@2 CAN handle peer-cycle (it auto-installs peers), un-skip it
+	delete(skipCombos, "npm@2-shrinkwrap/arborist-peer-cycle")
 
 	for _, cc := range correctnessMatrix {
 		cc := cc
