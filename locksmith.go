@@ -132,15 +132,18 @@ type yarnFormatter interface {
 func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
 	registry := npm.NewRegistryClient(opts.RegistryURL)
-	resolver := yarn.NewResolver()
 
+	var resolver *yarn.Resolver
 	var formatter yarnFormatter
 	switch opts.OutputFormat {
 	case FormatYarnClassic:
+		resolver = yarn.NewResolver() // no peer auto-install
 		formatter = yarn.NewYarnClassicFormatter()
 	case FormatYarnBerryV6:
+		resolver = yarn.NewBerryResolver() // peer auto-install
 		formatter = yarn.NewYarnBerryV6Formatter()
 	case FormatYarnBerryV8:
+		resolver = yarn.NewBerryResolver() // peer auto-install
 		formatter = yarn.NewYarnBerryV8Formatter()
 	}
 

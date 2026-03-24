@@ -14,11 +14,24 @@ import (
 // Resolver implements yarn-classic-style dependency resolution (strict, no hoisting).
 // Yarn classic resolves to flat versions like pnpm - the lockfile contains a flat
 // list of resolved packages, not a nested tree.
-type Resolver struct{}
+// Resolver implements yarn dependency resolution.
+type Resolver struct {
+	// AutoInstallPeers controls whether peer dependencies are automatically
+	// resolved. Yarn classic (v1) does NOT auto-install peers. Yarn berry
+	// (v2+) does.
+	AutoInstallPeers bool
+}
 
-// NewResolver returns a new yarn dependency resolver.
+// NewResolver returns a new yarn dependency resolver with default settings.
+// Defaults to no peer auto-install (yarn classic behavior).
 func NewResolver() *Resolver {
-	return &Resolver{}
+	return &Resolver{AutoInstallPeers: false}
+}
+
+// NewBerryResolver returns a yarn resolver with peer auto-install enabled
+// (yarn berry v2+ behavior).
+func NewBerryResolver() *Resolver {
+	return &Resolver{AutoInstallPeers: true}
 }
 
 // ResolveResult holds the yarn-specific resolution output.
@@ -47,12 +60,13 @@ func (r *Resolver) Resolve(ctx context.Context, project *ecosystem.ProjectSpec, 
 // including yarn-specific package metadata needed for lockfile generation.
 func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.ProjectSpec, registry ecosystem.Registry, opts ecosystem.ResolveOptions) (*ResolveResult, error) {
 	res := &yarnResolver{
-		registry:  registry,
-		cutoff:    opts.CutoffDate,
-		ctx:       ctx,
-		nodes:     make(map[string]*ecosystem.Node),
-		resolving: make(map[string]bool),
-		packages:  make(map[string]*ResolvedPackage),
+		registry:         registry,
+		cutoff:           opts.CutoffDate,
+		ctx:              ctx,
+		nodes:            make(map[string]*ecosystem.Node),
+		resolving:        make(map[string]bool),
+		packages:         make(map[string]*ResolvedPackage),
+		autoInstallPeers: r.AutoInstallPeers,
 	}
 
 	graph, err := res.resolve(project)
@@ -68,13 +82,14 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 
 // yarnResolver holds state during resolution.
 type yarnResolver struct {
-	registry    ecosystem.Registry
-	cutoff      *time.Time
-	ctx         context.Context
-	nodes       map[string]*ecosystem.Node // cache: "name@version" -> node
-	resolving   map[string]bool            // cycle detection
-	packages    map[string]*ResolvedPackage
-	projectDeps map[string]bool
+	registry         ecosystem.Registry
+	cutoff           *time.Time
+	ctx              context.Context
+	nodes            map[string]*ecosystem.Node // cache: "name@version" -> node
+	resolving        map[string]bool            // cycle detection
+	packages         map[string]*ResolvedPackage
+	projectDeps      map[string]bool
+	autoInstallPeers bool
 }
 
 // resolve builds the dependency graph from a project spec.
@@ -127,17 +142,6 @@ func (r *yarnResolver) resolveDep(graph *ecosystem.Graph, name, constraint strin
 		}
 		parsed = append(parsed, v)
 		versionMap[v.String()] = vi.Version
-	}
-
-	// Cross-tree dedup: reuse an already-resolved version if it satisfies.
-	for key, node := range r.nodes {
-		if !strings.HasPrefix(key, name+"@") {
-			continue
-		}
-		existingVer, err := semver.Parse(node.Version)
-		if err == nil && c.Check(existingVer) {
-			return node, nil
-		}
 	}
 
 	distTags, _ := r.registry.FetchDistTags(r.ctx, name)
@@ -226,7 +230,15 @@ func (r *yarnResolver) resolveDep(graph *ecosystem.Graph, name, constraint strin
 		resolvedDeps[depName] = child.Version
 	}
 
-	// Auto-install peer dependencies.
+	// Auto-install peer dependencies (only if enabled - yarn berry does this,
+	// yarn classic does not).
+	if !r.autoInstallPeers {
+		r.packages[key] = &ResolvedPackage{
+			Node:         node,
+			Dependencies: resolvedDeps,
+		}
+		return node, nil
+	}
 	peerNames := sortedKeys(meta.PeerDeps)
 	for _, depName := range peerNames {
 		if _, already := resolvedDeps[depName]; already {
