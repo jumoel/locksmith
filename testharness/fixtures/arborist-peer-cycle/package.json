@@ -1,0 +1,7 @@
+{
+  "name": "locksmith-test-arborist-peer-cycle",
+  "version": "1.0.0",
+  "dependencies": {
+    "@isaacs/peer-dep-cycle-a": "1"
+  }
+}

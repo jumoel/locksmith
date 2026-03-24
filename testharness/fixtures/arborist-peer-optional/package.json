@@ -1,0 +1,19 @@
+{
+  "name": "locksmith-test-arborist-peer-optional",
+  "version": "1.0.0",
+  "dependencies": {
+    "wrappy": "*"
+  },
+  "peerDependencies": {
+    "abbrev": "*",
+    "wrappy": "*"
+  },
+  "peerDependenciesMeta": {
+    "wrappy": {
+      "optional": true
+    },
+    "abbrev": {
+      "optional": true
+    }
+  }
+}

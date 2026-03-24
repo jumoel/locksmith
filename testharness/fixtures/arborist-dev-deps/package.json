@@ -1,0 +1,13 @@
+{
+  "name": "locksmith-test-arborist-dev-deps",
+  "version": "1.0.0",
+  "dependencies": {
+    "once": "^1.4.0"
+  },
+  "devDependencies": {
+    "tcompare": "^4.0.1"
+  },
+  "optionalDependencies": {
+    "inflight": "^1.0.6"
+  }
+}

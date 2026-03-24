@@ -79,6 +79,12 @@ func TestCorrectness(t *testing.T) {
 		"typescript-4", "typescript-5",
 		// Package managers
 		"yarn-classic-pkg",
+		// Arborist test fixtures (real @isaacs/ test packages)
+		"arborist-dedupe", "arborist-dev-deps", "arborist-optional-missing",
+		"arborist-bundle", "arborist-peer-cycle",
+		// pnpm/yarn-inspired edge cases
+		"pnpm-peer-ajv", "peer-chain", "conflicting-ranges",
+		"deprecated-pkg",
 		// Other real-world patterns
 		"peer-deps", "monorepo-tools", "cli-tools",
 		// Mixed

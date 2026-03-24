@@ -1,0 +1,10 @@
+{
+  "name": "locksmith-test-arborist-optional-missing",
+  "version": "1.0.0",
+  "dependencies": {
+    "abbrev": "^1.1.1"
+  },
+  "optionalDependencies": {
+    "@isaacs/this-does-not-exist-at-all": "*"
+  }
+}

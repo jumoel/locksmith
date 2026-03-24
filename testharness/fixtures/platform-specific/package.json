@@ -1,0 +1,7 @@
+{
+  "name": "locksmith-test-platform-specific",
+  "version": "1.0.0",
+  "dependencies": {
+    "esbuild": "^0.19.0"
+  }
+}
