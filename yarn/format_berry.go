@@ -106,12 +106,16 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 	m := make(map[string][]string)
 
 	// Constraints from the root project's declared dependencies.
-	for _, dep := range project.Dependencies {
-		for key, pkg := range result.Packages {
-			if pkg.Node.Name == dep.Name {
-				descriptor := fmt.Sprintf("%s@npm:%s", dep.Name, dep.Constraint)
-				m[key] = appendUnique(m[key], descriptor)
+	// Use root graph edges to find the exact resolved version for each dep,
+	// not a name-based scan which would match multiple versions incorrectly.
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target == nil {
+				continue
 			}
+			targetKey := edge.Target.Name + "@" + edge.Target.Version
+			descriptor := fmt.Sprintf("%s@npm:%s", edge.Name, edge.Constraint)
+			m[targetKey] = appendUnique(m[targetKey], descriptor)
 		}
 	}
 

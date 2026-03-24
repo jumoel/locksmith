@@ -64,17 +64,32 @@ var correctnessMatrix = []correctnessCase{
 func TestCorrectness(t *testing.T) {
 	allFixtures := fixtures(t)
 
-	// Use a subset of small fixtures for correctness - large ones are too slow
-	smallFixtures := filterFixtures(allFixtures, []string{
+	// Correctness fixtures include small fixtures plus real-world packages.
+	// Excludes very large fixtures (webpack, next-app) that are too slow for
+	// per-PM-version testing. Large fixtures get tested in TestGenerate instead.
+	correctnessFixtures := filterFixtures(allFixtures, []string{
+		// Core patterns
 		"minimal", "transitive", "diamond", "multi-dep",
-		"dev-deps", "pinned", "scoped",
+		"dev-deps", "pinned", "scoped", "zero-deps",
+		// React versions
+		"react-15", "react-16", "react-17", "react-18", "react-19",
+		// Next.js (lighter ones)
+		"next-12", "next-13",
+		// TypeScript
+		"typescript-4", "typescript-5",
+		// Package managers
+		"yarn-classic-pkg",
+		// Other real-world patterns
+		"peer-deps", "monorepo-tools", "cli-tools",
+		// Mixed
+		"mixed-large", "many-direct",
 	})
 
 	for _, cc := range correctnessMatrix {
 		cc := cc
 		t.Run(cc.PMLabel, func(t *testing.T) {
 			t.Parallel()
-			for _, fixture := range smallFixtures {
+			for _, fixture := range correctnessFixtures {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
 					t.Parallel()
@@ -150,16 +165,34 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 		t.Fatalf("reading real lockfile: %v", err)
 	}
 
+	// Step 3a: Textual comparison - the gold standard.
+	// If the lockfile bytes are identical, we're done.
+	if string(result.Lockfile) == string(realLockfile) {
+		t.Logf("byte-identical lockfile (%d bytes)", len(result.Lockfile))
+		return
+	}
+
+	// Step 3b: Lockfiles differ textually. This may be acceptable if the
+	// resolved versions are the same (field ordering, formatting, extra
+	// metadata like license fields can differ). Log the textual diff for
+	// inspection but only fail if the resolved versions differ.
+	locksmith_versions := extractVersions(t, result.Lockfile, cc.LockFileName)
 	realVersions := extractVersions(t, realLockfile, cc.RealLockFileName)
 
-	// Step 3: Compare
 	if !versionsMatch(locksmith_versions, realVersions) {
-		t.Errorf("resolution mismatch for %s/%s:\nlocksmith: %v\nreal %s: %v\ndiff:\n%s",
+		// Save both lockfiles for manual inspection.
+		debugDir := filepath.Join("..", ".tmp", "correctness-debug", cc.PMLabel, fixture)
+		os.MkdirAll(debugDir, 0o755)
+		os.WriteFile(filepath.Join(debugDir, "locksmith-"+cc.LockFileName), result.Lockfile, 0o644)
+		os.WriteFile(filepath.Join(debugDir, "real-"+cc.RealLockFileName), realLockfile, 0o644)
+
+		t.Errorf("resolution mismatch for %s/%s:\nlocksmith: %v\nreal %s: %v\ndiff:\n%s\nfull lockfiles saved to %s",
 			cc.Format, fixture,
 			locksmith_versions, cc.PMLabel, realVersions,
-			versionDiff(locksmith_versions, realVersions))
+			versionDiff(locksmith_versions, realVersions),
+			debugDir)
 	} else {
-		t.Logf("exact match: %d packages resolved identically", len(locksmith_versions))
+		t.Logf("versions match (%d packages), but lockfile text differs (formatting/metadata)", len(locksmith_versions))
 	}
 }
 

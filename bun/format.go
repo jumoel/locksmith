@@ -113,25 +113,44 @@ func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedMap {
 	return entry
 }
 
-// buildPackages constructs the packages map. Each entry maps a package name
+// buildPackages constructs the packages map. Each entry maps a package key
 // to an array: [resolved-spec, "", {dependencies: {...}}, integrity]
+//
+// When only one version of a package exists, the key is the bare name.
+// When multiple versions exist, each is keyed by "name@version".
 func buildPackages(result *ResolveResult) orderedMap {
-	byName := make(map[string]*ResolvedPackage)
+	// Group packages by name to detect multi-version cases.
+	byName := make(map[string][]*ResolvedPackage)
 	for _, pkg := range result.Packages {
-		byName[pkg.Node.Name] = pkg
+		byName[pkg.Node.Name] = append(byName[pkg.Node.Name], pkg)
 	}
 
-	names := make([]string, 0, len(byName))
-	for name := range byName {
-		names = append(names, name)
+	// Build keyed entries: bare name for single-version, name@version for multi.
+	type keyedPkg struct {
+		key string
+		pkg *ResolvedPackage
 	}
-	sort.Strings(names)
+	var entries []keyedPkg
+	for name, pkgs := range byName {
+		if len(pkgs) == 1 {
+			entries = append(entries, keyedPkg{key: name, pkg: pkgs[0]})
+		} else {
+			for _, pkg := range pkgs {
+				entries = append(entries, keyedPkg{
+					key: fmt.Sprintf("%s@%s", name, pkg.Node.Version),
+					pkg: pkg,
+				})
+			}
+		}
+	}
 
-	packages := make(orderedMap, 0, len(names))
-	for _, name := range names {
-		pkg := byName[name]
-		entry := buildPackageEntry(pkg)
-		packages = append(packages, orderedEntry{Key: name, Value: entry})
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].key < entries[j].key
+	})
+
+	packages := make(orderedMap, 0, len(entries))
+	for _, e := range entries {
+		packages = append(packages, orderedEntry{Key: e.key, Value: buildPackageEntry(e.pkg)})
 	}
 
 	return packages
