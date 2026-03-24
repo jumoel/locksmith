@@ -158,18 +158,20 @@ func (r *resolver) resolveDep(graph *ecosystem.Graph, name, constraint string, d
 		versionMap[v.String()] = vi.Version
 	}
 
-	// Cross-tree deduplication: before picking a new version, check if any
-	// already-resolved version of this package satisfies the current constraint.
-	// This matches npm's Arborist behavior where it deduplicates across the
-	// entire tree - if extsprintf@1.3.0 is already resolved and ^1.2.0 is
-	// the new constraint, reuse 1.3.0 instead of picking 1.4.1.
-	for key, node := range r.nodes {
-		if !strings.HasPrefix(key, name+"@") {
-			continue
-		}
-		existingVer, err := semver.Parse(node.Version)
-		if err == nil && c.Check(existingVer) {
-			return node, nil
+	// Cross-tree deduplication for transitive deps only: if an existing
+	// resolved version satisfies the constraint AND this is a transitive dep
+	// (not a root dep), reuse it. Root deps always get fresh resolution to
+	// allow multiple versions (e.g., arborist-dedupe needs b@1.0.0 nested
+	// under a AND b@2.0.0 at root).
+	if !r.projectDeps[name] {
+		for key, node := range r.nodes {
+			if !strings.HasPrefix(key, name+"@") {
+				continue
+			}
+			existingVer, err := semver.Parse(node.Version)
+			if err == nil && c.Check(existingVer) {
+				return node, nil
+			}
 		}
 	}
 
