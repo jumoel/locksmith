@@ -3,6 +3,7 @@ package ecosystem
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jumoel/locksmith/internal/maputil"
@@ -82,14 +83,32 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 }
 
 func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depType DepType) (*Node, error) {
-	c, err := semver.ParseConstraint(constraint)
-	if err != nil {
-		return nil, fmt.Errorf("parsing constraint %q: %w", constraint, err)
+	// Handle npm alias syntax: "npm:actual-package@^1.0.0"
+	// The alias name is used for the dependency key, but the actual package
+	// name and constraint are extracted for registry resolution.
+	actualName := name
+	actualConstraint := constraint
+	if strings.HasPrefix(constraint, "npm:") {
+		aliasSpec := strings.TrimPrefix(constraint, "npm:")
+		// Split "package-name@constraint" - handle scoped packages like @scope/pkg@^1.0.0
+		atIdx := strings.LastIndex(aliasSpec, "@")
+		if atIdx > 0 {
+			actualName = aliasSpec[:atIdx]
+			actualConstraint = aliasSpec[atIdx+1:]
+		} else {
+			actualName = aliasSpec
+			actualConstraint = "*"
+		}
 	}
 
-	versions, err := s.registry.FetchVersions(s.ctx, name, s.cutoff)
+	c, err := semver.ParseConstraint(actualConstraint)
 	if err != nil {
-		return nil, fmt.Errorf("fetching versions for %s: %w", name, err)
+		return nil, fmt.Errorf("parsing constraint %q: %w", actualConstraint, err)
+	}
+
+	versions, err := s.registry.FetchVersions(s.ctx, actualName, s.cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("fetching versions for %s: %w", actualName, err)
 	}
 
 	var parsed []*semver.Version
@@ -105,20 +124,20 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 
 	// Cross-tree dedup for transitive deps: O(1) via NodeIndex.
 	if s.policy.CrossTreeDedup && !s.projectDeps[name] {
-		if existing := s.nodeIndex.FindSatisfying(name, c); existing != nil {
+		if existing := s.nodeIndex.FindSatisfying(actualName, c); existing != nil {
 			return existing, nil
 		}
 	}
 
 	// npm-pick-manifest: prefer latest dist-tag.
-	distTags, _ := s.registry.FetchDistTags(s.ctx, name)
+	distTags, _ := s.registry.FetchDistTags(s.ctx, actualName)
 	best := semver.PickVersion(parsed, c, distTags["latest"])
 	if best == nil {
-		return nil, fmt.Errorf("no version of %s satisfies %s", name, constraint)
+		return nil, fmt.Errorf("no version of %s satisfies %s", actualName, actualConstraint)
 	}
 
 	version := versionMap[best.String()]
-	key := name + "@" + version
+	key := actualName + "@" + version
 
 	// Exact version dedup.
 	if node, ok := s.nodes[key]; ok {
@@ -127,18 +146,18 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 
 	// Cycle detection.
 	if s.resolving[key] {
-		node := &Node{Name: name, Version: version}
+		node := &Node{Name: actualName, Version: version}
 		s.nodes[key] = node
-		s.nodeIndex.Add(name, node)
+		s.nodeIndex.Add(actualName, node)
 		graph.Nodes[key] = node
 		return node, nil
 	}
 	s.resolving[key] = true
 	defer func() { delete(s.resolving, key) }()
 
-	meta, err := s.registry.FetchMetadata(s.ctx, name, version)
+	meta, err := s.registry.FetchMetadata(s.ctx, actualName, version)
 	if err != nil {
-		return nil, fmt.Errorf("fetching metadata for %s@%s: %w", name, version, err)
+		return nil, fmt.Errorf("fetching metadata for %s@%s: %w", actualName, version, err)
 	}
 
 	node := &Node{
@@ -169,7 +188,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	}
 
 	s.nodes[key] = node
-	s.nodeIndex.Add(name, node)
+	s.nodeIndex.Add(actualName, node)
 	graph.Nodes[key] = node
 
 	// Resolve transitive regular deps.
