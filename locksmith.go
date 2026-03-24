@@ -32,7 +32,7 @@ func Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error
 		return generateNpm(ctx, opts)
 	case FormatPnpmLockV5, FormatPnpmLockV6, FormatPnpmLockV9:
 		return generatePnpm(ctx, opts)
-	case FormatYarnClassic, FormatYarnBerryV6, FormatYarnBerryV8:
+	case FormatYarnClassic, FormatYarnBerryV5, FormatYarnBerryV6, FormatYarnBerryV7, FormatYarnBerryV8:
 		return generateYarn(ctx, opts)
 	case FormatBunLock:
 		return generateBun(ctx, opts)
@@ -139,13 +139,19 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 	var formatter yarnFormatter
 	switch opts.OutputFormat {
 	case FormatYarnClassic:
-		resolver = yarn.NewResolver() // no peer auto-install
+		resolver = yarn.NewResolver()
 		formatter = yarn.NewYarnClassicFormatter()
+	case FormatYarnBerryV5:
+		resolver = yarn.NewBerryResolver()
+		formatter = yarn.NewYarnBerryV5Formatter()
 	case FormatYarnBerryV6:
-		resolver = yarn.NewBerryResolver() // peer auto-install
+		resolver = yarn.NewBerryResolver()
 		formatter = yarn.NewYarnBerryV6Formatter()
+	case FormatYarnBerryV7:
+		resolver = yarn.NewBerryResolver()
+		formatter = yarn.NewYarnBerryV7Formatter()
 	case FormatYarnBerryV8:
-		resolver = yarn.NewBerryResolver() // peer auto-install
+		resolver = yarn.NewBerryResolver()
 		formatter = yarn.NewYarnBerryV8Formatter()
 	}
 

@@ -23,7 +23,9 @@ const (
 
 	// yarn lockfile formats.
 	FormatYarnClassic OutputFormat = "yarn-classic"
+	FormatYarnBerryV5 OutputFormat = "yarn-berry-v5"
 	FormatYarnBerryV6 OutputFormat = "yarn-berry-v6"
+	FormatYarnBerryV7 OutputFormat = "yarn-berry-v7"
 	FormatYarnBerryV8 OutputFormat = "yarn-berry-v8"
 
 	// bun lockfile formats.
@@ -41,7 +43,9 @@ func AllFormats() []OutputFormat {
 		FormatPnpmLockV6,
 		FormatPnpmLockV9,
 		FormatYarnClassic,
+		FormatYarnBerryV5,
 		FormatYarnBerryV6,
+		FormatYarnBerryV7,
 		FormatYarnBerryV8,
 		FormatBunLock,
 	}

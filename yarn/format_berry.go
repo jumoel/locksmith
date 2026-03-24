@@ -10,13 +10,23 @@ import (
 	"github.com/jumoel/locksmith/ecosystem"
 )
 
-// YarnBerryV6Formatter produces yarn.lock output in yarn berry v6 format (yarn 3).
+// YarnBerryV5Formatter produces yarn.lock output in yarn berry v5 format (yarn 2.x).
+type YarnBerryV5Formatter struct{}
+
+func NewYarnBerryV5Formatter() *YarnBerryV5Formatter { return &YarnBerryV5Formatter{} }
+
+func (f *YarnBerryV5Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSpec) ([]byte, error) {
+	return nil, fmt.Errorf("use FormatFromResult for yarn berry lockfile generation")
+}
+
+func (f *YarnBerryV5Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
+	return formatBerry(result, project, 5, 8)
+}
+
+// YarnBerryV6Formatter produces yarn.lock output in yarn berry v6 format (yarn 3.0-3.4).
 type YarnBerryV6Formatter struct{}
 
-// NewYarnBerryV6Formatter returns a new yarn berry v6 formatter.
-func NewYarnBerryV6Formatter() *YarnBerryV6Formatter {
-	return &YarnBerryV6Formatter{}
-}
+func NewYarnBerryV6Formatter() *YarnBerryV6Formatter { return &YarnBerryV6Formatter{} }
 
 // Format implements ecosystem.Formatter but returns an error directing callers
 // to use FormatFromResult instead, since yarn berry lockfiles require resolution
@@ -28,6 +38,19 @@ func (f *YarnBerryV6Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 // FormatFromResult produces yarn.lock v6 bytes from a resolve result.
 func (f *YarnBerryV6Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerry(result, project, 6, 8)
+}
+
+// YarnBerryV7Formatter produces yarn.lock output in yarn berry v7 format (yarn 3.5+).
+type YarnBerryV7Formatter struct{}
+
+func NewYarnBerryV7Formatter() *YarnBerryV7Formatter { return &YarnBerryV7Formatter{} }
+
+func (f *YarnBerryV7Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSpec) ([]byte, error) {
+	return nil, fmt.Errorf("use FormatFromResult for yarn berry lockfile generation")
+}
+
+func (f *YarnBerryV7Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
+	return formatBerry(result, project, 7, 8)
 }
 
 // YarnBerryV8Formatter produces yarn.lock output in yarn berry v8 format (yarn 4).
