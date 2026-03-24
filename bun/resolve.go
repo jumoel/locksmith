@@ -2,22 +2,16 @@ package bun
 
 import (
 	"context"
-	"fmt"
-	"sort"
-	"strings"
-	"time"
 
 	"github.com/jumoel/locksmith/ecosystem"
-	"github.com/jumoel/locksmith/internal/semver"
 )
 
-// Resolver implements bun-style dependency resolution (flat, single version per package).
+// Resolver implements bun-style dependency resolution as a thin wrapper
+// around the shared resolution engine.
 type Resolver struct{}
 
 // NewResolver returns a new bun dependency resolver.
-func NewResolver() *Resolver {
-	return &Resolver{}
-}
+func NewResolver() *Resolver { return &Resolver{} }
 
 // ResolveResult holds the bun-specific resolution output.
 type ResolveResult struct {
@@ -44,237 +38,24 @@ func (r *Resolver) Resolve(ctx context.Context, project *ecosystem.ProjectSpec, 
 // ResolveForLockfile resolves all dependencies and returns the full result
 // including bun-specific package metadata needed for lockfile generation.
 func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.ProjectSpec, registry ecosystem.Registry, opts ecosystem.ResolveOptions) (*ResolveResult, error) {
-	res := &bunResolver{
-		registry:  registry,
-		cutoff:    opts.CutoffDate,
-		ctx:       ctx,
-		nodes:     make(map[string]*ecosystem.Node),
-		resolving: make(map[string]bool),
-		packages:  make(map[string]*ResolvedPackage),
+	packages := make(map[string]*ResolvedPackage)
+
+	policy := ecosystem.ResolverPolicy{
+		CrossTreeDedup:   true, // bun deduplicates like pnpm
+		AutoInstallPeers: true,
+		OnNodeResolved: func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
+			depConstraints := make(map[string]string)
+			for _, e := range edges {
+				depConstraints[e.Name] = e.Constraint // bun stores constraints
+			}
+			packages[key] = &ResolvedPackage{Node: node, Dependencies: depConstraints}
+		},
 	}
 
-	graph, err := res.resolve(project)
+	graph, err := ecosystem.Resolve(ctx, project, registry, opts, policy)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ResolveResult{
-		Graph:    graph,
-		Packages: res.packages,
-	}, nil
-}
-
-// bunResolver holds state during resolution.
-type bunResolver struct {
-	registry    ecosystem.Registry
-	cutoff      *time.Time
-	ctx         context.Context
-	nodes       map[string]*ecosystem.Node // cache: "name@version" -> node
-	resolving   map[string]bool            // cycle detection
-	packages    map[string]*ResolvedPackage
-	projectDeps map[string]bool
-}
-
-// resolve builds the dependency graph from a project spec.
-func (r *bunResolver) resolve(project *ecosystem.ProjectSpec) (*ecosystem.Graph, error) {
-	r.projectDeps = make(map[string]bool)
-	for _, dep := range project.Dependencies {
-		r.projectDeps[dep.Name] = true
-	}
-
-	graph := &ecosystem.Graph{
-		Root:  &ecosystem.Node{Name: project.Name, Version: project.Version},
-		Nodes: make(map[string]*ecosystem.Node),
-	}
-
-	for _, dep := range project.Dependencies {
-		node, err := r.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
-		if err != nil {
-			if dep.Type == ecosystem.DepOptional {
-				continue
-			}
-			return nil, fmt.Errorf("resolving %s@%s: %w", dep.Name, dep.Constraint, err)
-		}
-		graph.Root.Dependencies = append(graph.Root.Dependencies, &ecosystem.Edge{
-			Name: dep.Name, Constraint: dep.Constraint, Target: node, Type: dep.Type,
-		})
-	}
-
-	return graph, nil
-}
-
-// resolveDep resolves a single dependency to a specific version,
-// then recursively resolves its transitive dependencies.
-func (r *bunResolver) resolveDep(graph *ecosystem.Graph, name, constraint string, depType ecosystem.DepType) (*ecosystem.Node, error) {
-	c, err := semver.ParseConstraint(constraint)
-	if err != nil {
-		return nil, fmt.Errorf("parsing constraint %q: %w", constraint, err)
-	}
-
-	versions, err := r.registry.FetchVersions(r.ctx, name, r.cutoff)
-	if err != nil {
-		return nil, err
-	}
-
-	var parsed []*semver.Version
-	versionMap := make(map[string]string) // normalized -> original
-	for _, vi := range versions {
-		v, err := semver.Parse(vi.Version)
-		if err != nil {
-			continue
-		}
-		parsed = append(parsed, v)
-		versionMap[v.String()] = vi.Version
-	}
-
-	// Cross-tree dedup for transitive deps: bun deduplicates to one version
-	// per package name. Root deps get fresh resolution.
-	if !r.projectDeps[name] {
-		for key, node := range r.nodes {
-			if !strings.HasPrefix(key, name+"@") {
-				continue
-			}
-			existingVer, err := semver.Parse(node.Version)
-			if err == nil && c.Check(existingVer) {
-				return node, nil
-			}
-		}
-	}
-
-	distTags, _ := r.registry.FetchDistTags(r.ctx, name)
-	best := semver.PickVersion(parsed, c, distTags["latest"])
-	if best == nil {
-		return nil, fmt.Errorf("no version of %s satisfies %s", name, constraint)
-	}
-
-	version := versionMap[best.String()]
-	key := name + "@" + version
-
-	// Dedup: return cached node if already resolved.
-	if node, ok := r.nodes[key]; ok {
-		return node, nil
-	}
-
-	// Cycle detection: if already resolving this package, create a stub.
-	if r.resolving[key] {
-		node := &ecosystem.Node{Name: name, Version: version}
-		r.nodes[key] = node
-		graph.Nodes[key] = node
-		return node, nil
-	}
-	r.resolving[key] = true
-	defer func() { delete(r.resolving, key) }()
-
-	meta, err := r.registry.FetchMetadata(r.ctx, name, version)
-	if err != nil {
-		return nil, err
-	}
-
-	node := &ecosystem.Node{
-		Name:             meta.Name,
-		Version:          meta.Version,
-		Integrity:        meta.Integrity,
-		TarballURL:       meta.TarballURL,
-		HasInstallScript: meta.HasInstallScript,
-		Engines:          meta.Engines,
-		OS:               meta.OS,
-		CPU:              meta.CPU,
-		Bin:              meta.Bin,
-		License:          meta.License,
-		Deprecated:       meta.Deprecated,
-	}
-	if depType == ecosystem.DepDev {
-		node.DevOnly = true
-	}
-	if depType == ecosystem.DepOptional {
-		node.Optional = true
-	}
-
-	r.nodes[key] = node
-	graph.Nodes[key] = node
-
-	// Track dependency constraints for bun lockfile format.
-	// Bun stores the original constraints, not resolved versions.
-	depConstraints := make(map[string]string)
-
-	// Resolve regular dependencies.
-	depNames := sortedKeys(meta.Dependencies)
-	for _, depName := range depNames {
-		depConstraint := meta.Dependencies[depName]
-		child, err := r.resolveDep(graph, depName, depConstraint, ecosystem.DepRegular)
-		if err != nil {
-			return nil, err
-		}
-		node.Dependencies = append(node.Dependencies, &ecosystem.Edge{
-			Name: depName, Constraint: depConstraint, Target: child, Type: ecosystem.DepRegular,
-		})
-		depConstraints[depName] = depConstraint
-	}
-
-	// Resolve optional dependencies (failures are not fatal).
-	optNames := sortedKeys(meta.OptionalDeps)
-	for _, depName := range optNames {
-		if _, already := meta.Dependencies[depName]; already {
-			continue
-		}
-		depConstraint := meta.OptionalDeps[depName]
-		child, err := r.resolveDep(graph, depName, depConstraint, ecosystem.DepOptional)
-		if err != nil {
-			continue
-		}
-		node.Dependencies = append(node.Dependencies, &ecosystem.Edge{
-			Name: depName, Constraint: depConstraint, Target: child, Type: ecosystem.DepOptional,
-		})
-		depConstraints[depName] = depConstraint
-	}
-
-	// Auto-install peer dependencies.
-	peerNames := sortedKeys(meta.PeerDeps)
-	for _, depName := range peerNames {
-		if _, already := depConstraints[depName]; already {
-			continue
-		}
-		if pm, ok := meta.PeerDepsMeta[depName]; ok && pm.Optional {
-			continue
-		}
-		if r.projectDeps[depName] {
-			continue
-		}
-		found := false
-		for k := range r.nodes {
-			if strings.HasPrefix(k, depName+"@") {
-				found = true
-				break
-			}
-		}
-		if found {
-			continue
-		}
-		depConstraint := meta.PeerDeps[depName]
-		child, err := r.resolveDep(graph, depName, depConstraint, ecosystem.DepPeer)
-		if err != nil {
-			continue
-		}
-		node.Dependencies = append(node.Dependencies, &ecosystem.Edge{
-			Name: depName, Constraint: depConstraint, Target: child, Type: ecosystem.DepPeer,
-		})
-		depConstraints[depName] = depConstraint
-	}
-
-	r.packages[key] = &ResolvedPackage{
-		Node:         node,
-		Dependencies: depConstraints,
-	}
-
-	return node, nil
-}
-
-// sortedKeys returns the keys of a map in sorted order.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return &ResolveResult{Graph: graph, Packages: packages}, nil
 }
