@@ -1,12 +1,29 @@
 # Test runner for locksmith integration tests.
-# Supports multiple package manager versions for compatibility testing across
-# npm, pnpm, yarn, and bun.
+# Uses multi-stage builds to support old npm versions that need older Node.js.
 
+# Stage 1: Old npm versions that need Node 8
+FROM node:8-slim AS old-npm
+RUN npm install -g npm@1 --prefix /opt/npm1 2>/dev/null || true
+RUN npm install -g npm@2 --prefix /opt/npm2
+RUN npm install -g npm@3 --prefix /opt/npm3
+RUN npm install -g npm@4 --prefix /opt/npm4
+RUN npm install -g npm@5 --prefix /opt/npm5
+
+# Stage 2: Main image with modern Node for npm 6+
 FROM node:22-slim AS base
 
-# Install npm versions (6 through 10; node 22 ships with npm 11).
-# npm 6 may fail on newer Node.js - allow failure gracefully.
-RUN npm install -g npm@6 --prefix /opt/npm6 2>/dev/null || true
+# Copy old npm versions from Stage 1
+COPY --from=old-npm /opt/npm1 /opt/npm1
+COPY --from=old-npm /opt/npm2 /opt/npm2
+COPY --from=old-npm /opt/npm3 /opt/npm3
+COPY --from=old-npm /opt/npm4 /opt/npm4
+COPY --from=old-npm /opt/npm5 /opt/npm5
+# Also copy Node 8 binary for running old npm versions
+COPY --from=old-npm /usr/local/bin/node /opt/node8/bin/node
+COPY --from=old-npm /usr/local/lib/node_modules /opt/node8/lib/node_modules
+
+# Install npm versions 6-10 (node 22 ships with npm 11).
+RUN npm install -g npm@6 --prefix /opt/npm6
 RUN npm install -g npm@7 --prefix /opt/npm7
 RUN npm install -g npm@8 --prefix /opt/npm8
 RUN npm install -g npm@9 --prefix /opt/npm9

@@ -57,8 +57,13 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		formatter = npm.NewPackageLockV1Formatter()
 	case FormatPackageLockV2:
 		formatter = npm.NewPackageLockV2Formatter()
-	case FormatPackageLockV3, FormatNpmShrinkwrap:
+	case FormatPackageLockV3:
 		formatter = npm.NewPackageLockV3Formatter()
+	case FormatNpmShrinkwrap:
+		// npm-shrinkwrap.json uses v1 format for maximum backward compatibility.
+		// npm 1-6 only understand the v1 hierarchical dependencies format, and
+		// npm 7+ can also read v1 (with an upgrade warning).
+		formatter = npm.NewPackageLockV1Formatter()
 	}
 
 	spec, err := parser.Parse(opts.SpecFile)

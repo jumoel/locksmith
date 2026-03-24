@@ -13,26 +13,19 @@ import (
 // The output is valid JSON (which is a subset of JSONC).
 type BunLockFormatter struct{}
 
-// NewBunLockFormatter returns a new bun.lock formatter.
 func NewBunLockFormatter() *BunLockFormatter {
 	return &BunLockFormatter{}
 }
 
-// Format implements ecosystem.Formatter but returns an error directing callers
-// to use FormatFromResult instead, since bun lockfiles require resolution
-// metadata that only ResolveResult provides.
 func (f *BunLockFormatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSpec) ([]byte, error) {
 	return nil, fmt.Errorf("use FormatFromResult for bun lockfile generation")
 }
 
-// orderedEntry is a single key-value pair in an ordered JSON object.
 type orderedEntry struct {
 	Key   string
 	Value interface{}
 }
 
-// orderedMap is a JSON-serializable ordered key-value list that preserves
-// insertion order when marshaled.
 type orderedMap []orderedEntry
 
 func (om orderedMap) MarshalJSON() ([]byte, error) {
@@ -61,22 +54,17 @@ func (om orderedMap) MarshalJSON() ([]byte, error) {
 }
 
 // FormatFromResult produces bun.lock bytes from a resolve result.
-// Output is deterministic: all map keys are sorted alphabetically.
 func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
-	// Build workspace dependencies.
 	workspaceDeps := buildWorkspaceDeps(project)
-
-	// Build workspace entry.
 	workspaces := orderedMap{
 		{Key: "", Value: workspaceDeps},
 	}
 
-	// Build packages map.
 	packages := buildPackages(result)
 
-	// Top-level lockfile structure.
 	lockfile := orderedMap{
-		{Key: "lockfileVersion", Value: 0},
+		{Key: "lockfileVersion", Value: 1},
+		{Key: "configVersion", Value: 1},
 		{Key: "workspaces", Value: workspaces},
 		{Key: "packages", Value: packages},
 	}
@@ -92,7 +80,6 @@ func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecos
 	return buf.Bytes(), nil
 }
 
-// buildWorkspaceDeps constructs the workspace dependency declaration object.
 func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedMap {
 	deps := make(map[string]string)
 	devDeps := make(map[string]string)
@@ -109,7 +96,9 @@ func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedMap {
 		}
 	}
 
-	var entry orderedMap
+	entry := orderedMap{
+		{Key: "name", Value: project.Name},
+	}
 
 	if len(deps) > 0 {
 		entry = append(entry, orderedEntry{Key: "dependencies", Value: sortedStringMap(deps)})
@@ -124,17 +113,9 @@ func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedMap {
 	return entry
 }
 
-// buildPackages constructs the packages map from the resolve result.
-// Each entry maps a package name to an array:
-// [resolved-spec, tarball-url, integrity, dependencies-map, license]
+// buildPackages constructs the packages map. Each entry maps a package name
+// to an array: [resolved-spec, "", {dependencies: {...}}, integrity]
 func buildPackages(result *ResolveResult) orderedMap {
-	// Collect package names (not "name@version" keys - bun uses bare names).
-	type pkgInfo struct {
-		name string
-		pkg  *ResolvedPackage
-	}
-
-	// Dedup by name since flat resolution means one version per name.
 	byName := make(map[string]*ResolvedPackage)
 	for _, pkg := range result.Packages {
 		byName[pkg.Node.Name] = pkg
@@ -156,16 +137,14 @@ func buildPackages(result *ResolveResult) orderedMap {
 	return packages
 }
 
-// buildPackageEntry constructs the array value for a single package in the
-// packages map: [resolved-spec, tarball-url, integrity, deps, license]
+// buildPackageEntry constructs the array for a single package:
+// [resolved-spec, "", metadata-object, integrity]
 func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 	node := pkg.Node
-
-	// resolved-spec: "name@version"
 	resolvedSpec := fmt.Sprintf("%s@%s", node.Name, node.Version)
 
-	// dependencies map (constraint strings, not resolved versions)
-	var depsMap orderedMap
+	// metadata object - contains dependencies if any
+	var metadata orderedMap
 	if len(pkg.Dependencies) > 0 {
 		depNames := make([]string, 0, len(pkg.Dependencies))
 		for name := range pkg.Dependencies {
@@ -173,27 +152,25 @@ func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 		}
 		sort.Strings(depNames)
 
-		depsMap = make(orderedMap, len(depNames))
+		depsMap := make(orderedMap, len(depNames))
 		for i, name := range depNames {
 			depsMap[i] = orderedEntry{Key: name, Value: pkg.Dependencies[name]}
 		}
+		metadata = orderedMap{
+			{Key: "dependencies", Value: depsMap},
+		}
 	} else {
-		depsMap = orderedMap{}
+		metadata = orderedMap{}
 	}
-
-	// License string (empty string if not set).
-	license := node.License
 
 	return []interface{}{
 		resolvedSpec,
-		node.TarballURL,
+		"",
+		metadata,
 		node.Integrity,
-		depsMap,
-		license,
 	}
 }
 
-// sortedStringMap converts a map[string]string to an orderedMap with sorted keys.
 func sortedStringMap(m map[string]string) orderedMap {
 	keys := make([]string, 0, len(m))
 	for k := range m {
