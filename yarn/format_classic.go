@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/maputil"
 )
 
 // YarnClassicFormatter produces yarn.lock v1 (classic) output.
@@ -173,7 +174,7 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 		// dependencies
 		if len(entry.dependencies) > 0 {
 			buf.WriteString("  dependencies:\n")
-			depNames := sortedKeys(entry.dependencies)
+			depNames := maputil.SortedKeys(entry.dependencies)
 			for _, depName := range depNames {
 				depConstraint := entry.dependencies[depName]
 				fmt.Fprintf(&buf, "    %s %q\n", depName, depConstraint)

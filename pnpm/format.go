@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/maputil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -434,7 +435,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 	if len(allDeps) > 0 {
 		specNode := &yaml.Node{Kind: yaml.MappingNode}
-		specNames := sortedKeys(allDeps)
+		specNames := maputil.SortedKeys(allDeps)
 		for _, name := range specNames {
 			addMapping(specNode, name, scalarNode(allDeps[name], 0))
 		}

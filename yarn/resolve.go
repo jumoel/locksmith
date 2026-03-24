@@ -2,7 +2,6 @@ package yarn
 
 import (
 	"context"
-	"sort"
 
 	"github.com/jumoel/locksmith/ecosystem"
 )
@@ -77,12 +76,3 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 	return &ResolveResult{Graph: graph, Packages: packages}, nil
 }
 
-// sortedKeys returns the keys of a map in sorted order.
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
