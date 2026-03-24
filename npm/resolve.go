@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jumoel/locksmith/ecosystem"
@@ -150,6 +151,21 @@ func (r *resolver) resolveDep(graph *ecosystem.Graph, name, constraint string, d
 		versionMap[v.String()] = vi.Version
 	}
 
+	// Cross-tree deduplication: before picking a new version, check if any
+	// already-resolved version of this package satisfies the current constraint.
+	// This matches npm's Arborist behavior where it deduplicates across the
+	// entire tree - if extsprintf@1.3.0 is already resolved and ^1.2.0 is
+	// the new constraint, reuse 1.3.0 instead of picking 1.4.1.
+	for key, node := range r.nodes {
+		if !strings.HasPrefix(key, name+"@") {
+			continue
+		}
+		existingVer, err := semver.Parse(node.Version)
+		if err == nil && c.Check(existingVer) {
+			return node, nil
+		}
+	}
+
 	// npm-pick-manifest algorithm: prefer the "latest" dist-tag version
 	// if it satisfies the constraint. Otherwise fall back to highest matching.
 	distTags, _ := r.registry.FetchDistTags(r.ctx, name)
@@ -161,7 +177,7 @@ func (r *resolver) resolveDep(graph *ecosystem.Graph, name, constraint string, d
 	version := versionMap[best.String()]
 	key := name + "@" + version
 
-	// Check if already resolved (dedup).
+	// Check if already resolved (exact version dedup).
 	if node, ok := r.nodes[key]; ok {
 		return node, nil
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jumoel/locksmith/ecosystem"
@@ -118,6 +119,17 @@ func (r *bunResolver) resolveDep(graph *ecosystem.Graph, name, constraint string
 		}
 		parsed = append(parsed, v)
 		versionMap[v.String()] = vi.Version
+	}
+
+	// Cross-tree dedup: reuse an already-resolved version if it satisfies.
+	for key, node := range r.nodes {
+		if !strings.HasPrefix(key, name+"@") {
+			continue
+		}
+		existingVer, err := semver.Parse(node.Version)
+		if err == nil && c.Check(existingVer) {
+			return node, nil
+		}
 	}
 
 	distTags, _ := r.registry.FetchDistTags(r.ctx, name)
