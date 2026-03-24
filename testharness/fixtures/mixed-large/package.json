@@ -1,0 +1,14 @@
+{
+  "name": "locksmith-test-mixed-large",
+  "version": "1.0.0",
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "axios": "^1.6.0",
+    "chalk": "^4.1.0",
+    "commander": "^11.0.0",
+    "debug": "^4.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

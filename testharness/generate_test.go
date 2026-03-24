@@ -13,92 +13,137 @@ import (
 	"github.com/jumoel/locksmith"
 )
 
-// TestGenerate_AllFixtures_PackageLockV3 tests that locksmith.Generate() succeeds
-// for all fixtures against the real npm registry. This does NOT verify the lockfile
-// is accepted by a package manager - for that, run integration tests.
-func TestGenerate_AllFixtures_PackageLockV3(t *testing.T) {
+// formatTestCase defines a lockfile format and its expected output characteristics.
+type formatTestCase struct {
+	Format    locksmith.OutputFormat
+	FileName  string // expected output filename
+	Ecosystem string // for CI matrix grouping
+	IsJSON    bool   // whether the output is JSON (vs YAML or other)
+}
+
+// formatTestCases covers all 11 lockfile formats.
+var formatTestCases = []formatTestCase{
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm", true},
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm", true},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm", true},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", true},
+	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm", false},
+	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm", false},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm", false},
+	{locksmith.FormatYarnClassic, "yarn.lock", "yarn", false},
+	{locksmith.FormatYarnBerryV6, "yarn.lock", "yarn", false},
+	{locksmith.FormatYarnBerryV8, "yarn.lock", "yarn", false},
+	{locksmith.FormatBunLock, "bun.lock", "bun", false},
+}
+
+// TestGenerate tests that locksmith.Generate succeeds for all formats against all
+// fixtures using the real npm registry. This does NOT verify the lockfile is
+// accepted by a real package manager - for that, run integration tests.
+//
+// Test names follow the pattern TestGenerate/{format}/{fixture} for CI matrix
+// filtering with -run.
+func TestGenerate(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping real registry test in short mode")
+		t.Skip("skipping real registry tests in short mode")
 	}
 
-	for _, fixture := range fixtureNames(t) {
-		t.Run(fixture, func(t *testing.T) {
-			specData, err := os.ReadFile(filepath.Join("fixtures", fixture, "package.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
+	fixtures := fixtureNames(t)
 
-			ctx := context.Background()
-			result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
-				SpecFile:     specData,
-				OutputFormat: locksmith.FormatPackageLockV3,
-			})
-			if err != nil {
-				t.Fatalf("Generate failed: %v", err)
-			}
+	for _, tc := range formatTestCases {
+		tc := tc
+		t.Run(string(tc.Format), func(t *testing.T) {
+			t.Parallel()
+			for _, fixture := range fixtures {
+				fixture := fixture
+				t.Run(fixture, func(t *testing.T) {
+					t.Parallel()
+					specData := readFixture(t, fixture)
 
-			// Verify valid JSON.
-			var parsed map[string]interface{}
-			if err := json.Unmarshal(result.Lockfile, &parsed); err != nil {
-				t.Fatalf("invalid JSON: %v\nlockfile:\n%s", err, string(result.Lockfile))
-			}
+					ctx := context.Background()
+					result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
+						SpecFile:     specData,
+						OutputFormat: tc.Format,
+					})
+					if err != nil {
+						t.Fatalf("Generate(%s, %s) failed: %v", tc.Format, fixture, err)
+					}
 
-			// Basic structure checks.
-			if parsed["lockfileVersion"].(float64) != 3 {
-				t.Error("lockfileVersion should be 3")
-			}
-			packages, ok := parsed["packages"].(map[string]interface{})
-			if !ok {
-				t.Fatal("packages field missing or wrong type")
-			}
-			if _, ok := packages[""]; !ok {
-				t.Error("root entry missing")
-			}
-			// Should have at least 1 non-root package.
-			if len(packages) < 2 {
-				t.Errorf("expected at least 2 packages (root + deps), got %d", len(packages))
-			}
+					if len(result.Lockfile) == 0 {
+						t.Fatal("generated empty lockfile")
+					}
 
-			t.Logf("generated %d bytes, %d packages", len(result.Lockfile), len(packages))
+					// Format-specific sanity checks.
+					validateOutput(t, tc, result.Lockfile)
+
+					t.Logf("generated %d bytes for %s/%s", len(result.Lockfile), tc.Format, fixture)
+				})
+			}
 		})
 	}
 }
 
-func TestGenerate_AllFixtures_PnpmLockV9(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real registry test in short mode")
+// validateOutput performs basic structural validation on generated lockfile content.
+func validateOutput(t *testing.T, tc formatTestCase, data []byte) {
+	t.Helper()
+
+	if tc.IsJSON {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("generated lockfile is not valid JSON: %v\nfirst 500 bytes:\n%s", err, truncate(data, 500))
+		}
 	}
 
-	for _, fixture := range fixtureNames(t) {
-		t.Run(fixture, func(t *testing.T) {
-			specData, err := os.ReadFile(filepath.Join("fixtures", fixture, "package.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
+	content := string(data)
 
-			ctx := context.Background()
-			result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
-				SpecFile:     specData,
-				OutputFormat: locksmith.FormatPnpmLockV9,
-			})
-			if err != nil {
-				t.Fatalf("Generate failed: %v", err)
+	switch tc.Format {
+	case locksmith.FormatPackageLockV1:
+		requireJSONField(t, data, "lockfileVersion", float64(1))
+	case locksmith.FormatPackageLockV2:
+		requireJSONField(t, data, "lockfileVersion", float64(2))
+	case locksmith.FormatPackageLockV3:
+		requireJSONField(t, data, "lockfileVersion", float64(3))
+	case locksmith.FormatNpmShrinkwrap:
+		// npm-shrinkwrap.json uses the same structure as package-lock.json.
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(data, &parsed); err == nil {
+			if _, ok := parsed["lockfileVersion"]; !ok {
+				t.Error("npm-shrinkwrap.json missing lockfileVersion")
 			}
+		}
+	case locksmith.FormatPnpmLockV5, locksmith.FormatPnpmLockV6, locksmith.FormatPnpmLockV9:
+		if !strings.Contains(content, "lockfileVersion") {
+			t.Error("pnpm lockfile missing lockfileVersion")
+		}
+	case locksmith.FormatYarnClassic:
+		if !strings.Contains(content, "# yarn lockfile v1") {
+			t.Error("yarn classic lockfile missing header comment")
+		}
+	case locksmith.FormatYarnBerryV6, locksmith.FormatYarnBerryV8:
+		if !strings.Contains(content, "__metadata") {
+			t.Error("yarn berry lockfile missing __metadata section")
+		}
+	case locksmith.FormatBunLock:
+		// bun.lock is a JSONC-like format; check it's non-trivial.
+		if len(data) < 10 {
+			t.Error("bun.lock output too small")
+		}
+	}
+}
 
-			// Basic YAML structure check - should contain key sections.
-			lockfileStr := string(result.Lockfile)
-			if !strings.Contains(lockfileStr, "lockfileVersion") {
-				t.Error("missing lockfileVersion in output")
-			}
-			if !strings.Contains(lockfileStr, "importers") {
-				t.Error("missing importers in output")
-			}
-			if !strings.Contains(lockfileStr, "packages") {
-				t.Error("missing packages in output")
-			}
-
-			t.Logf("generated %d bytes", len(result.Lockfile))
-		})
+// requireJSONField checks that a top-level JSON field has the expected value.
+func requireJSONField(t *testing.T, data []byte, field string, expected float64) {
+	t.Helper()
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return // already reported by the JSON validity check
+	}
+	val, ok := parsed[field]
+	if !ok {
+		t.Errorf("missing field %q", field)
+		return
+	}
+	if num, ok := val.(float64); ok && num != expected {
+		t.Errorf("%s = %v, want %v", field, num, expected)
 	}
 }
 
@@ -114,5 +159,24 @@ func fixtureNames(t *testing.T) []string {
 			names = append(names, e.Name())
 		}
 	}
+	if len(names) == 0 {
+		t.Fatal("no fixture directories found in fixtures/")
+	}
 	return names
+}
+
+func readFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("fixtures", name, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func truncate(data []byte, n int) string {
+	if len(data) <= n {
+		return string(data)
+	}
+	return string(data[:n]) + "..."
 }

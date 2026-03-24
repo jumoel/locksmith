@@ -4,7 +4,6 @@ package testharness
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +15,74 @@ import (
 
 const dockerImage = "locksmith-test-runner"
 
+// verificationCase defines a single format + package manager version combination
+// that should be able to consume the generated lockfile.
+type verificationCase struct {
+	Format    locksmith.OutputFormat
+	FileName  string   // lockfile name to write
+	PMName    string   // package manager name for test naming
+	PMVersion string   // version string passed to helper script
+	Command   []string // docker command to run
+	SetupFunc func(t *testing.T, dir string) // optional per-case setup
+}
+
+// verificationMatrix defines the full compatibility matrix.
+// Each entry pairs a lockfile format with a package manager version that should
+// accept it via frozen install.
+var verificationMatrix = []verificationCase{
+	// package-lock-v1: npm 6 through 11.
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm", "6", []string{"run-npm", "6", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm", "7", []string{"run-npm", "7", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm", "8", []string{"run-npm", "8", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm", "9", []string{"run-npm", "9", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm", "10", []string{"run-npm", "10", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV1, "package-lock.json", "npm", "11", []string{"run-npm", "11", "ci", "--ignore-scripts"}, nil},
+
+	// package-lock-v2: npm 7 through 11.
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm", "7", []string{"run-npm", "7", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm", "8", []string{"run-npm", "8", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm", "9", []string{"run-npm", "9", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm", "10", []string{"run-npm", "10", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV2, "package-lock.json", "npm", "11", []string{"run-npm", "11", "ci", "--ignore-scripts"}, nil},
+
+	// package-lock-v3: npm 7 through 11.
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm", "7", []string{"run-npm", "7", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm", "8", []string{"run-npm", "8", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm", "9", []string{"run-npm", "9", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm", "10", []string{"run-npm", "10", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatPackageLockV3, "package-lock.json", "npm", "11", []string{"run-npm", "11", "ci", "--ignore-scripts"}, nil},
+
+	// npm-shrinkwrap: npm 6 through 11.
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "6", []string{"run-npm", "6", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "7", []string{"run-npm", "7", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "8", []string{"run-npm", "8", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "9", []string{"run-npm", "9", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "10", []string{"run-npm", "10", "ci", "--ignore-scripts"}, nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "11", []string{"run-npm", "11", "ci", "--ignore-scripts"}, nil},
+
+	// pnpm-lock-v5: pnpm 7.
+	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm", "7", []string{"run-pnpm", "7", "install", "--frozen-lockfile"}, nil},
+
+	// pnpm-lock-v6: pnpm 8.
+	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm", "8", []string{"run-pnpm", "8", "install", "--frozen-lockfile"}, nil},
+
+	// pnpm-lock-v9: pnpm 9 and 10.
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm", "9", []string{"run-pnpm", "9", "install", "--frozen-lockfile"}, nil},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm", "10", []string{"run-pnpm", "10", "install", "--frozen-lockfile"}, nil},
+
+	// yarn-classic: yarn 1.
+	{locksmith.FormatYarnClassic, "yarn.lock", "yarn", "1", []string{"run-yarn", "1", "install", "--frozen-lockfile"}, nil},
+
+	// yarn-berry-v6: yarn 3.
+	{locksmith.FormatYarnBerryV6, "yarn.lock", "yarn", "3", []string{"run-yarn", "3", "install", "--immutable"}, setupYarnBerry},
+
+	// yarn-berry-v8: yarn 4.
+	{locksmith.FormatYarnBerryV8, "yarn.lock", "yarn", "4", []string{"run-yarn", "4", "install", "--immutable"}, setupYarnBerry},
+
+	// bun-lock: bun (latest).
+	{locksmith.FormatBunLock, "bun.lock", "bun", "latest", []string{"bun", "install", "--frozen-lockfile"}, nil},
+}
+
 func TestMain(m *testing.M) {
 	// Build docker image before running tests.
 	cmd := exec.Command("docker", "build", "-t", dockerImage, "--platform", "linux/amd64", ".")
@@ -26,6 +93,35 @@ func TestMain(m *testing.M) {
 		panic("failed to build test docker image: " + err.Error())
 	}
 	os.Exit(m.Run())
+}
+
+// TestIntegration runs the full compatibility matrix: generate a lockfile with
+// locksmith, then verify it installs cleanly with the target package manager
+// version inside Docker.
+//
+// Test names follow the pattern TestIntegration/{format}/{fixture}/{pm}_{version}
+// so CI can filter by format:
+//
+//	go test -tags integration -run "TestIntegration/package-lock-v3" ./testharness/
+func TestIntegration(t *testing.T) {
+	allFixtures := fixtures(t)
+
+	for _, vc := range verificationMatrix {
+		vc := vc
+		t.Run(string(vc.Format), func(t *testing.T) {
+			t.Parallel()
+			for _, fixture := range allFixtures {
+				fixture := fixture
+				t.Run(fixture, func(t *testing.T) {
+					t.Parallel()
+					pmTag := vc.PMName + "_" + vc.PMVersion
+					t.Run(pmTag, func(t *testing.T) {
+						runVerification(t, vc, fixture)
+					})
+				})
+			}
+		})
+	}
 }
 
 // fixtures returns all fixture directory names.
@@ -41,142 +137,77 @@ func fixtures(t *testing.T) []string {
 			names = append(names, e.Name())
 		}
 	}
+	if len(names) == 0 {
+		t.Fatal("no fixture directories found in fixtures/")
+	}
 	return names
 }
 
-func TestNpmPackageLockV3(t *testing.T) {
-	for _, fixture := range fixtures(t) {
-		t.Run(fixture, func(t *testing.T) {
-			testNpmLockfile(t, fixture, locksmith.FormatPackageLockV3, "package-lock.json")
-		})
-	}
-}
-
-func TestNpmShrinkwrap(t *testing.T) {
-	for _, fixture := range fixtures(t) {
-		t.Run(fixture, func(t *testing.T) {
-			testNpmLockfile(t, fixture, locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json")
-		})
-	}
-}
-
-func TestPnpmLockV9(t *testing.T) {
-	for _, fixture := range fixtures(t) {
-		t.Run(fixture, func(t *testing.T) {
-			testPnpmLockfile(t, fixture)
-		})
-	}
-}
-
-func testNpmLockfile(t *testing.T, fixture string, format locksmith.OutputFormat, filename string) {
+// runVerification generates a lockfile and verifies it with Docker.
+func runVerification(t *testing.T, vc verificationCase, fixture string) {
 	t.Helper()
 
-	// Read fixture package.json.
-	specPath := filepath.Join("fixtures", fixture, "package.json")
-	specData, err := os.ReadFile(specPath)
+	// Read fixture.
+	specData, err := os.ReadFile(filepath.Join("fixtures", fixture, "package.json"))
 	if err != nil {
-		t.Fatalf("reading fixture: %v", err)
+		t.Fatalf("reading fixture %s: %v", fixture, err)
 	}
 
 	// Generate lockfile.
 	ctx := context.Background()
 	result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
 		SpecFile:     specData,
-		OutputFormat: format,
+		OutputFormat: vc.Format,
 	})
 	if err != nil {
-		t.Fatalf("generating lockfile: %v", err)
+		t.Fatalf("Generate(%s, %s) failed: %v", vc.Format, fixture, err)
+	}
+	if len(result.Lockfile) == 0 {
+		t.Fatal("generated empty lockfile")
 	}
 
-	// Verify it is valid JSON.
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(result.Lockfile, &parsed); err != nil {
-		t.Fatalf("generated lockfile is not valid JSON: %v", err)
-	}
-
-	// Write to temp directory for npm ci.
+	// Write to temp directory for Docker mount.
 	tmpDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmpDir, "package.json"), specData, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, filename), result.Lockfile, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, vc.FileName), result.Lockfile, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Test with multiple npm versions.
-	// package-lock.json v3 works with npm 7+; shrinkwrap is tested with npm 10 only.
-	npmVersions := []string{"10"}
-	if format == locksmith.FormatPackageLockV3 {
-		npmVersions = []string{"7", "8", "9", "10"}
+	// Run optional setup (e.g., .yarnrc.yml for berry).
+	if vc.SetupFunc != nil {
+		vc.SetupFunc(t, tmpDir)
 	}
 
-	for _, npmVersion := range npmVersions {
-		t.Run("npm"+npmVersion, func(t *testing.T) {
-			runNpmCi(t, tmpDir, npmVersion)
-		})
-	}
-}
-
-func testPnpmLockfile(t *testing.T, fixture string) {
-	t.Helper()
-
-	specPath := filepath.Join("fixtures", fixture, "package.json")
-	specData, err := os.ReadFile(specPath)
-	if err != nil {
-		t.Fatalf("reading fixture: %v", err)
-	}
-
-	ctx := context.Background()
-	result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
-		SpecFile:     specData,
-		OutputFormat: locksmith.FormatPnpmLockV9,
-	})
-	if err != nil {
-		t.Fatalf("generating pnpm lockfile: %v", err)
-	}
-
-	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "package.json"), specData, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "pnpm-lock.yaml"), result.Lockfile, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Run pnpm install --frozen-lockfile in Docker.
-	runPnpmFrozen(t, tmpDir)
-}
-
-func runNpmCi(t *testing.T, projectDir, npmVersion string) {
-	t.Helper()
-
-	cmd := exec.Command("docker", "run", "--rm",
+	// Run package manager in Docker.
+	args := []string{
+		"run", "--rm",
 		"--platform", "linux/amd64",
-		"-v", projectDir+":/workspace",
+		"-v", tmpDir + ":/workspace",
 		"-w", "/workspace",
 		dockerImage,
-		"run-npm", npmVersion, "ci", "--ignore-scripts",
-	)
+	}
+	args = append(args, vc.Command...)
+
+	cmd := exec.Command("docker", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("npm %s ci failed:\n%s\nerror: %v", npmVersion, string(output), err)
+		t.Fatalf("%s %s verification failed for %s/%s:\n%s\nerror: %v",
+			vc.PMName, vc.PMVersion, vc.Format, fixture,
+			string(output), err)
 	}
-	t.Logf("npm %s ci succeeded: %s", npmVersion, strings.TrimSpace(string(output)))
+	t.Logf("%s %s verified %s/%s: %s",
+		vc.PMName, vc.PMVersion, vc.Format, fixture,
+		strings.TrimSpace(string(output)))
 }
 
-func runPnpmFrozen(t *testing.T, projectDir string) {
+// setupYarnBerry creates the .yarnrc.yml needed for yarn berry to use
+// node_modules instead of PnP mode.
+func setupYarnBerry(t *testing.T, dir string) {
 	t.Helper()
-
-	cmd := exec.Command("docker", "run", "--rm",
-		"--platform", "linux/amd64",
-		"-v", projectDir+":/workspace",
-		"-w", "/workspace",
-		dockerImage,
-		"pnpm", "install", "--frozen-lockfile",
-	)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("pnpm install --frozen-lockfile failed:\n%s\nerror: %v", string(output), err)
+	yarnrc := []byte("nodeLinker: node-modules\n")
+	if err := os.WriteFile(filepath.Join(dir, ".yarnrc.yml"), yarnrc, 0o644); err != nil {
+		t.Fatalf("writing .yarnrc.yml: %v", err)
 	}
-	t.Logf("pnpm install --frozen-lockfile succeeded: %s", strings.TrimSpace(string(output)))
 }
