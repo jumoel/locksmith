@@ -106,10 +106,14 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	// the same version, so we collect all constraints that point to each package.
 	constraintsByKey := buildConstraintMap(result, project)
 
-	// Build sorted entries.
+	// Build sorted entries. Skip packages with no constraints (e.g., filtered
+	// out by platform but still in the Packages map).
 	entries := make([]*berryEntry, 0, len(result.Packages))
 	for key, pkg := range result.Packages {
 		constraints := constraintsByKey[key]
+		if len(constraints) == 0 {
+			continue
+		}
 		sort.Strings(constraints)
 		entries = append(entries, &berryEntry{
 			constraints: constraints,
