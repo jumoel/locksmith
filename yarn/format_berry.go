@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/maputil"
 )
 
 // YarnBerryV5Formatter produces yarn.lock output in yarn berry v5 format (yarn 2.x).
@@ -89,26 +90,12 @@ type berryEntry struct {
 	pkg         *ResolvedPackage
 }
 
-// formatBerry is the shared implementation for yarn berry v6 and v8 lockfiles.
-// The two formats are structurally identical; they differ only in the metadata
-// version and cacheKey values.
 // berryConfig holds format-specific settings that differ between berry versions.
 type berryConfig struct {
 	MetadataVersion int
 	CacheKey        int
 	ChecksumPrefix  string // "10/" for v8, "" for v5-v7
 	IncludeRoot     bool   // true for yarn berry (adds workspace root entry)
-}
-
-func formatBerry(result *ResolveResult, project *ecosystem.ProjectSpec, metadataVersion, cacheKey int) ([]byte, error) {
-	// Default config - overridden per-version by callers.
-	cfg := berryConfig{
-		MetadataVersion: metadataVersion,
-		CacheKey:        cacheKey,
-		ChecksumPrefix:  "10/",
-		IncludeRoot:     true,
-	}
-	return formatBerryWithConfig(result, project, cfg)
 }
 
 func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec, cfg berryConfig) ([]byte, error) {
@@ -249,11 +236,7 @@ func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, checksumPrefix str
 	// Dependencies (sorted by name).
 	if len(pkg.Dependencies) > 0 {
 		b.WriteString("  dependencies:\n")
-		depNames := make([]string, 0, len(pkg.Dependencies))
-		for name := range pkg.Dependencies {
-			depNames = append(depNames, name)
-		}
-		sort.Strings(depNames)
+		depNames := maputil.SortedKeys(pkg.Dependencies)
 
 		for _, name := range depNames {
 			// Find the constraint used for this dependency from the node's edges.

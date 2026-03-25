@@ -13,6 +13,9 @@ type Resolver struct {
 	// resolved. Yarn classic (v1) does NOT auto-install peers. Yarn berry
 	// (v2+) does.
 	AutoInstallPeers bool
+
+	// PolicyOverride, if set, overrides the default resolution policy.
+	PolicyOverride *ecosystem.ResolverPolicy
 }
 
 // NewResolver returns a new yarn dependency resolver with default settings.
@@ -57,15 +60,21 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 	policy := ecosystem.ResolverPolicy{
 		CrossTreeDedup:   false, // yarn resolves each constraint independently
 		AutoInstallPeers: r.AutoInstallPeers,
-		OnNodeResolved: func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
-			resolvedDeps := make(map[string]string)
-			for _, e := range edges {
-				if e.Target != nil {
-					resolvedDeps[e.Name] = e.Target.Version
-				}
+	}
+	if r.PolicyOverride != nil {
+		policy.CrossTreeDedup = r.PolicyOverride.CrossTreeDedup
+		policy.AutoInstallPeers = r.PolicyOverride.AutoInstallPeers
+		policy.StorePeerMetaOnNode = r.PolicyOverride.StorePeerMetaOnNode
+	}
+	// OnNodeResolved is always set by this resolver, never overridden.
+	policy.OnNodeResolved = func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
+		resolvedDeps := make(map[string]string)
+		for _, e := range edges {
+			if e.Target != nil {
+				resolvedDeps[e.Name] = e.Target.Version
 			}
-			packages[key] = &ResolvedPackage{Node: node, Dependencies: resolvedDeps}
-		},
+		}
+		packages[key] = &ResolvedPackage{Node: node, Dependencies: resolvedDeps}
 	}
 
 	graph, err := ecosystem.Resolve(ctx, project, registry, opts, policy)

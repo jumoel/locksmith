@@ -8,7 +8,10 @@ import (
 
 // Resolver implements bun-style dependency resolution as a thin wrapper
 // around the shared resolution engine.
-type Resolver struct{}
+type Resolver struct {
+	// PolicyOverride, if set, overrides the default resolution policy.
+	PolicyOverride *ecosystem.ResolverPolicy
+}
 
 // NewResolver returns a new bun dependency resolver.
 func NewResolver() *Resolver { return &Resolver{} }
@@ -43,13 +46,19 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 	policy := ecosystem.ResolverPolicy{
 		CrossTreeDedup:   true, // bun deduplicates like pnpm
 		AutoInstallPeers: true,
-		OnNodeResolved: func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
-			depConstraints := make(map[string]string)
-			for _, e := range edges {
-				depConstraints[e.Name] = e.Constraint // bun stores constraints
-			}
-			packages[key] = &ResolvedPackage{Node: node, Dependencies: depConstraints}
-		},
+	}
+	if r.PolicyOverride != nil {
+		policy.CrossTreeDedup = r.PolicyOverride.CrossTreeDedup
+		policy.AutoInstallPeers = r.PolicyOverride.AutoInstallPeers
+		policy.StorePeerMetaOnNode = r.PolicyOverride.StorePeerMetaOnNode
+	}
+	// OnNodeResolved is always set by this resolver, never overridden.
+	policy.OnNodeResolved = func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
+		depConstraints := make(map[string]string)
+		for _, e := range edges {
+			depConstraints[e.Name] = e.Constraint // bun stores constraints
+		}
+		packages[key] = &ResolvedPackage{Node: node, Dependencies: depConstraints}
 	}
 
 	graph, err := ecosystem.Resolve(ctx, project, registry, opts, policy)

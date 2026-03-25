@@ -52,6 +52,7 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 		policy.AutoInstallPeers = r.PolicyOverride.AutoInstallPeers
 		policy.StorePeerMetaOnNode = r.PolicyOverride.StorePeerMetaOnNode
 	}
+	// OnNodeResolved is always set by this resolver, never overridden.
 	policy.OnNodeResolved = func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
 		resolvedDeps := make(map[string]string)
 		for _, e := range edges {

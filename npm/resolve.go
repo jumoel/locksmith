@@ -52,7 +52,9 @@ func (r *Resolver) ResolveWithPlacement(ctx context.Context, project *ecosystem.
 		StorePeerMetaOnNode: true,
 	}
 	if r.PolicyOverride != nil {
-		policy = *r.PolicyOverride
+		policy.CrossTreeDedup = r.PolicyOverride.CrossTreeDedup
+		policy.AutoInstallPeers = r.PolicyOverride.AutoInstallPeers
+		policy.StorePeerMetaOnNode = r.PolicyOverride.StorePeerMetaOnNode
 	}
 
 	graph, err := ecosystem.Resolve(ctx, project, registry, opts, policy)

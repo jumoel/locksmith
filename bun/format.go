@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/maputil"
 	"github.com/jumoel/locksmith/internal/orderedjson"
 )
 
@@ -121,11 +122,7 @@ func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 	// metadata object - contains dependencies if any
 	var metadata orderedjson.Map
 	if len(pkg.Dependencies) > 0 {
-		depNames := make([]string, 0, len(pkg.Dependencies))
-		for name := range pkg.Dependencies {
-			depNames = append(depNames, name)
-		}
-		sort.Strings(depNames)
+		depNames := maputil.SortedKeys(pkg.Dependencies)
 
 		depsMap := make(orderedjson.Map, len(depNames))
 		for i, name := range depNames {

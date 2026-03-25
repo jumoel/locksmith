@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/maputil"
 	"github.com/jumoel/locksmith/internal/orderedjson"
 )
 
@@ -145,11 +145,7 @@ func buildPackageEntry(node *ecosystem.Node) orderedjson.Map {
 	}
 	if len(node.PeerDepsMeta) > 0 {
 		peerMeta := make(orderedjson.Map, 0, len(node.PeerDepsMeta))
-		peerNames := make([]string, 0, len(node.PeerDepsMeta))
-		for name := range node.PeerDepsMeta {
-			peerNames = append(peerNames, name)
-		}
-		sort.Strings(peerNames)
+		peerNames := maputil.SortedMapKeys(node.PeerDepsMeta)
 		for _, name := range peerNames {
 			pm := node.PeerDepsMeta[name]
 			metaObj := orderedjson.Map{}

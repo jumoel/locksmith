@@ -3,7 +3,6 @@ package pnpm
 import (
 	"bytes"
 	"fmt"
-	"sort"
 
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/internal/maputil"
@@ -110,11 +109,7 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult) *yaml.Node
 		}
 	}
 
-	names := make([]string, 0, len(deps))
-	for n := range deps {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	names := maputil.SortedKeys(deps)
 
 	for _, name := range names {
 		constraint := deps[name]
@@ -133,11 +128,7 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult) *yaml.Node
 func buildPackages(result *ResolveResult) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
-	keys := make([]string, 0, len(result.Packages))
-	for k := range result.Packages {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := maputil.SortedMapKeys(result.Packages)
 
 	for _, key := range keys {
 		pkg := result.Packages[key]
@@ -150,11 +141,7 @@ func buildPackages(result *ResolveResult) *yaml.Node {
 
 		if len(pkg.Node.Engines) > 0 {
 			enginesNode := &yaml.Node{Kind: yaml.MappingNode}
-			engineKeys := make([]string, 0, len(pkg.Node.Engines))
-			for k := range pkg.Node.Engines {
-				engineKeys = append(engineKeys, k)
-			}
-			sort.Strings(engineKeys)
+			engineKeys := maputil.SortedKeys(pkg.Node.Engines)
 			for _, ek := range engineKeys {
 				addMapping(enginesNode, ek, scalarNode(pkg.Node.Engines[ek], yaml.SingleQuotedStyle))
 			}
@@ -179,11 +166,7 @@ func buildPackages(result *ResolveResult) *yaml.Node {
 func buildSnapshots(result *ResolveResult) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
-	keys := make([]string, 0, len(result.Packages))
-	for k := range result.Packages {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := maputil.SortedMapKeys(result.Packages)
 
 	for _, key := range keys {
 		pkg := result.Packages[key]
@@ -192,11 +175,7 @@ func buildSnapshots(result *ResolveResult) *yaml.Node {
 		if len(pkg.Dependencies) > 0 {
 			depsNode := &yaml.Node{Kind: yaml.MappingNode}
 
-			depNames := make([]string, 0, len(pkg.Dependencies))
-			for n := range pkg.Dependencies {
-				depNames = append(depNames, n)
-			}
-			sort.Strings(depNames)
+			depNames := maputil.SortedKeys(pkg.Dependencies)
 
 			for _, depName := range depNames {
 				depVersion := pkg.Dependencies[depName]
@@ -318,11 +297,7 @@ func buildInlinePackageNode(pkg *ResolvedPackage, isDev bool) *yaml.Node {
 	// engines: {node: '>=4'}
 	if len(pkg.Node.Engines) > 0 {
 		enginesNode := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
-		engineKeys := make([]string, 0, len(pkg.Node.Engines))
-		for k := range pkg.Node.Engines {
-			engineKeys = append(engineKeys, k)
-		}
-		sort.Strings(engineKeys)
+		engineKeys := maputil.SortedKeys(pkg.Node.Engines)
 		for _, ek := range engineKeys {
 			addMapping(enginesNode, ek, scalarNode(pkg.Node.Engines[ek], yaml.SingleQuotedStyle))
 		}
@@ -340,11 +315,7 @@ func buildInlinePackageNode(pkg *ResolvedPackage, isDev bool) *yaml.Node {
 	// dependencies (inline, not in separate snapshots)
 	if len(pkg.Dependencies) > 0 {
 		depsNode := &yaml.Node{Kind: yaml.MappingNode}
-		depNames := make([]string, 0, len(pkg.Dependencies))
-		for n := range pkg.Dependencies {
-			depNames = append(depNames, n)
-		}
-		sort.Strings(depNames)
+		depNames := maputil.SortedKeys(pkg.Dependencies)
 		for _, depName := range depNames {
 			addMapping(depsNode, depName, scalarNode(pkg.Dependencies[depName], 0))
 		}
@@ -422,11 +393,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	// dependencies: map of regular dep names to resolved versions.
 	if len(deps) > 0 {
 		depsNode := &yaml.Node{Kind: yaml.MappingNode}
-		names := make([]string, 0, len(deps))
-		for n := range deps {
-			names = append(names, n)
-		}
-		sort.Strings(names)
+		names := maputil.SortedKeys(deps)
 		for _, name := range names {
 			addMapping(depsNode, name, scalarNode(rootVersions[name], 0))
 		}
@@ -436,11 +403,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	// devDependencies: map of dev dep names to resolved versions.
 	if len(devDeps) > 0 {
 		devNode := &yaml.Node{Kind: yaml.MappingNode}
-		names := make([]string, 0, len(devDeps))
-		for n := range devDeps {
-			names = append(names, n)
-		}
-		sort.Strings(names)
+		names := maputil.SortedKeys(devDeps)
 		for _, name := range names {
 			addMapping(devNode, name, scalarNode(rootVersions[name], 0))
 		}
@@ -450,11 +413,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	// optionalDependencies
 	if len(optDeps) > 0 {
 		optNode := &yaml.Node{Kind: yaml.MappingNode}
-		names := make([]string, 0, len(optDeps))
-		for n := range optDeps {
-			names = append(names, n)
-		}
-		sort.Strings(names)
+		names := maputil.SortedKeys(optDeps)
 		for _, name := range names {
 			addMapping(optNode, name, scalarNode(rootVersions[name], 0))
 		}
@@ -463,11 +422,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 
 	// packages section with /name/version keys.
 	packagesNode := &yaml.Node{Kind: yaml.MappingNode}
-	keys := make([]string, 0, len(result.Packages))
-	for k := range result.Packages {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := maputil.SortedMapKeys(result.Packages)
 
 	for _, key := range keys {
 		pkg := result.Packages[key]
@@ -532,11 +487,7 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 
 	// packages section with /name@version keys.
 	packagesNode := &yaml.Node{Kind: yaml.MappingNode}
-	keys := make([]string, 0, len(result.Packages))
-	for k := range result.Packages {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := maputil.SortedMapKeys(result.Packages)
 
 	for _, key := range keys {
 		pkg := result.Packages[key]

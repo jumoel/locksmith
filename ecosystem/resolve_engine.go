@@ -222,17 +222,16 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 
 	// Auto-install peer deps if enabled.
 	if s.policy.AutoInstallPeers {
+		// Build edge name set once for O(1) lookups.
+		resolvedEdgeNames := make(map[string]bool, len(node.Dependencies))
+		for _, edge := range node.Dependencies {
+			resolvedEdgeNames[edge.Name] = true
+		}
+
 		peerNames := maputil.SortedKeys(meta.PeerDeps)
 		for _, depName := range peerNames {
 			// Skip if already resolved as regular or optional dep.
-			alreadyResolved := false
-			for _, edge := range node.Dependencies {
-				if edge.Name == depName {
-					alreadyResolved = true
-					break
-				}
-			}
-			if alreadyResolved {
+			if resolvedEdgeNames[depName] {
 				continue
 			}
 			// Skip optional peers.
