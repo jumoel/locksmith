@@ -136,6 +136,14 @@ func TestIntegration(t *testing.T) {
 						t.Skip("npm: alias syntax not preserved in lockfile output")
 					case "zero-deps":
 						t.Skip("some PMs delete/reject lockfiles for empty projects")
+					case "arborist-optional-missing":
+						if vc.PMName == "yarn" && vc.PMVersion == "1" {
+							t.Skip("yarn classic resolves optional deps from registry even in frozen mode")
+						}
+					case "platform-specific", "next-app", "next-12", "next-13", "next-14", "next-15", "optional-deps":
+						if vc.PMName == "yarn" && vc.PMVersion == "1" {
+							t.Skip("yarn classic rejects platform-incompatible optional deps in Docker")
+						}
 					}
 					t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion
