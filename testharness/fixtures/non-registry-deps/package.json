@@ -1,0 +1,9 @@
+{
+  "name": "locksmith-test-non-registry-deps",
+  "version": "1.0.0",
+  "dependencies": {
+    "ms": "^2.1.0",
+    "local-pkg": "file:../some-local-package",
+    "git-pkg": "github:sindresorhus/is-odd"
+  }
+}

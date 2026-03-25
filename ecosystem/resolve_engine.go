@@ -101,6 +101,29 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		}
 	}
 
+	// Detect non-registry dependency specifiers (file:, git+, github:, etc.).
+	// These can't be resolved from the npm registry. Create a placeholder node
+	// so the lockfile structure is valid but with minimal metadata.
+	if isNonRegistrySpecifier(actualConstraint) {
+		key := actualName + "@" + actualConstraint
+		if node, ok := s.nodes[key]; ok {
+			return node, nil
+		}
+		node := &Node{
+			Name:    actualName,
+			Version: actualConstraint,
+		}
+		s.nodes[key] = node
+		s.nodeIndex.Add(actualName, node)
+		graph.Nodes[key] = node
+		if s.policy.OnNodeResolved != nil {
+			s.policy.OnNodeResolved(key, node, &VersionMetadata{
+				Name: actualName, Version: actualConstraint,
+			}, nil)
+		}
+		return node, nil
+	}
+
 	c, err := semver.ParseConstraint(actualConstraint)
 	if err != nil {
 		return nil, fmt.Errorf("parsing constraint %q: %w", actualConstraint, err)
@@ -263,4 +286,23 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	}
 
 	return node, nil
+}
+
+// isNonRegistrySpecifier returns true if the constraint is a non-registry
+// dependency type that cannot be resolved from the npm registry.
+func isNonRegistrySpecifier(constraint string) bool {
+	nonRegistryPrefixes := []string{
+		"file:", "link:", "portal:",       // local filesystem
+		"git+", "git://", "git@",         // git URLs
+		"github:", "bitbucket:", "gitlab:", // shorthand git hosts
+		"workspace:",                      // pnpm workspace protocol
+		"patch:", "exec:",                 // pnpm extensions
+		"http://", "https://",            // tarball URLs
+	}
+	for _, p := range nonRegistryPrefixes {
+		if strings.HasPrefix(constraint, p) {
+			return true
+		}
+	}
+	return false
 }
