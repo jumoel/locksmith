@@ -127,7 +127,11 @@ func computePlacement(graph *ecosystem.Graph) (*ResolveResult, error) {
 			}
 			placed := placeDep(work.parent, edge, result)
 			if placed != nil {
-				key := edge.Target.Name + "@" + edge.Target.Version
+				// Use path as seen key so that the same package placed at
+				// different locations in the tree gets its deps processed
+				// at each location. Using just name@version caused transitive
+				// deps to be missing when a package was nested in multiple places.
+				key := placed.Path
 				if !seen[key] {
 					seen[key] = true
 					queue = append(queue, placeWork{parent: placed, node: edge.Target})
