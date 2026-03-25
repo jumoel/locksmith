@@ -72,8 +72,9 @@ var correctnessMatrix = []correctnessCase{
 	{locksmith.FormatPackageLockV3, "package-lock.json", "npm@11-v3", []string{"run-npm", "11", "install", "--package-lock-only", "--ignore-scripts"}, "package-lock.json", nil, nil},
 
 	// --- pnpm: each version with its native lockfile format ---
-	{locksmith.FormatPnpmLockV4, "pnpm-lock.yaml", "pnpm@4-v4", []string{"run-pnpm", "4", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
-	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@7-v5", []string{"run-pnpm", "7", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
+	{locksmith.FormatPnpmLockV4, "pnpm-lock.yaml", "pnpm@4-v5.1", []string{"run-pnpm", "4", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
+	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@5-v5.2", []string{"run-pnpm", "5", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
+	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@7-v5.4", []string{"run-pnpm", "7", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
 	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10-v9", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},

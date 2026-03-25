@@ -11,6 +11,21 @@ import (
 	"github.com/jumoel/locksmith/internal/maputil"
 )
 
+// YarnBerryV4Formatter produces yarn.lock output in yarn berry v4 format (yarn 2.0 initial stable).
+type YarnBerryV4Formatter struct{}
+
+func NewYarnBerryV4Formatter() *YarnBerryV4Formatter { return &YarnBerryV4Formatter{} }
+
+func (f *YarnBerryV4Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSpec) ([]byte, error) {
+	return nil, fmt.Errorf("use FormatFromResult for yarn berry lockfile generation")
+}
+
+func (f *YarnBerryV4Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
+	return formatBerryWithConfig(result, project, berryConfig{
+		MetadataVersion: 4, CacheKey: 8, ChecksumPrefix: "", IncludeRoot: true,
+	})
+}
+
 // YarnBerryV5Formatter produces yarn.lock output in yarn berry v5 format (yarn 2.x).
 type YarnBerryV5Formatter struct{}
 

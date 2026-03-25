@@ -30,6 +30,7 @@ RUN npm install -g npm@9 --prefix /opt/npm9
 RUN npm install -g npm@10 --prefix /opt/npm10
 
 # Install pnpm versions.
+RUN npm install -g pnpm@5 --prefix /opt/pnpm5
 RUN npm install -g pnpm@7 --prefix /opt/pnpm7
 RUN npm install -g pnpm@8 --prefix /opt/pnpm8
 RUN npm install -g pnpm@9 --prefix /opt/pnpm9

@@ -510,9 +510,9 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 	return buf.Bytes(), nil
 }
 
-// PnpmLockV4Formatter produces pnpm-lock.yaml lockfileVersion 4 output.
-// V4 is identical to V5 but with lockfileVersion 4 and no specifiers section.
-// Used by pnpm v4 (2020).
+// PnpmLockV4Formatter produces pnpm-lock.yaml lockfileVersion 5.1 output.
+// Despite the name, pnpm CLI v4 actually produces lockfileVersion 5.1.
+// Structurally identical to v5.4 but with a different version number.
 type PnpmLockV4Formatter struct{}
 
 func NewPnpmLockV4Formatter() *PnpmLockV4Formatter { return &PnpmLockV4Formatter{} }
@@ -526,7 +526,7 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	root := &yaml.Node{Kind: yaml.MappingNode}
 	doc.Content = append(doc.Content, root)
 
-	addMapping(root, "lockfileVersion", scalarNode("4", 0))
+	addMapping(root, "lockfileVersion", scalarNode("5.1", 0))
 
 	devFlags := computeDevFlags(result, project)
 
@@ -540,6 +540,19 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 
 	g := ecosystem.GroupDependenciesByType(project.Dependencies)
+
+	// V5.1 has specifiers section (same as v5.4).
+	allDeps := make(map[string]string)
+	for _, d := range project.Dependencies {
+		allDeps[d.Name] = d.Constraint
+	}
+	if len(allDeps) > 0 {
+		specNode := &yaml.Node{Kind: yaml.MappingNode}
+		for _, name := range maputil.SortedKeys(allDeps) {
+			addMapping(specNode, name, scalarNode(allDeps[name], 0))
+		}
+		addMapping(root, "specifiers", specNode)
+	}
 
 	if len(g.Regular) > 0 {
 		depsNode := &yaml.Node{Kind: yaml.MappingNode}
