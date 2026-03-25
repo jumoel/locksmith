@@ -165,17 +165,21 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 				b.WriteString(fmt.Sprintf("%q:\n", rootConstraint))
 				b.WriteString(fmt.Sprintf("  version: %s\n", "0.0.0-use.local"))
 				b.WriteString(fmt.Sprintf("  resolution: \"%s@workspace:.\"\n", project.Name))
-				if len(project.Dependencies) > 0 {
+				// Collect non-peer deps (deduplicated via map).
+				depMap := make(map[string]string)
+				for _, d := range project.Dependencies {
+					if d.Type == ecosystem.DepPeer {
+						continue
+					}
+					depMap[d.Name] = d.Constraint
+				}
+				if len(depMap) > 0 {
 					b.WriteString("  dependencies:\n")
-					depNames := make([]string, 0, len(project.Dependencies))
-					for _, d := range project.Dependencies {
-						depNames = append(depNames, d.Name)
+					depNames := make([]string, 0, len(depMap))
+					for name := range depMap {
+						depNames = append(depNames, name)
 					}
 					sort.Strings(depNames)
-					depMap := make(map[string]string)
-					for _, d := range project.Dependencies {
-						depMap[d.Name] = d.Constraint
-					}
 					for _, name := range depNames {
 						yamlName := name
 						if strings.HasPrefix(name, "@") {
@@ -236,6 +240,11 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target == nil {
+				continue
+			}
+			// Skip peer dep edges from root - yarn berry doesn't include
+			// optional peer deps in the lockfile.
+			if edge.Type == ecosystem.DepPeer {
 				continue
 			}
 			targetKey := edge.Target.Name + "@" + edge.Target.Version
