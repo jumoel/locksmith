@@ -22,7 +22,7 @@ func (f *YarnBerryV4Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 
 func (f *YarnBerryV4Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 4, CacheKey: 7, ChecksumPrefix: "", IncludeRoot: true,
+		MetadataVersion: 4, CacheKey: 7, ChecksumPrefix: "", IncludeRoot: true, SkipChecksum: true,
 	})
 }
 
@@ -37,7 +37,7 @@ func (f *YarnBerryV5Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 
 func (f *YarnBerryV5Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 5, CacheKey: 8, ChecksumPrefix: "", IncludeRoot: true,
+		MetadataVersion: 5, CacheKey: 8, ChecksumPrefix: "", IncludeRoot: true, SkipChecksum: true,
 	})
 }
 
@@ -94,8 +94,9 @@ type berryEntry struct {
 type berryConfig struct {
 	MetadataVersion int
 	CacheKey        int
-	ChecksumPrefix  string // "10/" for v8, "" for v5-v7
+	ChecksumPrefix  string // "10/" for v8, "" for v5-v6
 	IncludeRoot     bool   // true for yarn berry (adds workspace root entry)
+	SkipChecksum bool // v4/v5: omit checksums (yarn 2/3.1 computes cache-specific hashes)
 }
 
 func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec, cfg berryConfig) ([]byte, error) {
@@ -136,7 +137,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	for _, entry := range entries {
 		b.WriteByte('\n')
 		writeEntryKey(&b, entry.constraints)
-		writeEntryBody(&b, entry.pkg, cfg.ChecksumPrefix)
+		writeEntryBody(&b, entry.pkg, cfg.ChecksumPrefix, cfg.SkipChecksum)
 	}
 
 	// Write workspace root entry if enabled.
@@ -227,7 +228,7 @@ func writeEntryKey(b *strings.Builder, constraints []string) {
 }
 
 // writeEntryBody writes the indented fields for a single package entry.
-func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, checksumPrefix string) {
+func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, checksumPrefix string, skipChecksum bool) {
 	node := pkg.Node
 
 	b.WriteString(fmt.Sprintf("  version: %s\n", node.Version))
@@ -245,8 +246,10 @@ func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, checksumPrefix str
 		}
 	}
 
-	// Checksum: convert SRI integrity hash to yarn berry's hex format.
-	if node.Integrity != "" {
+	// Checksum: for v6/v8, emit sha512 hex (yarn 3.2+/4 don't validate).
+	// For v4/v5, omit entirely - yarn 2/3.1 compute cache-specific hashes
+	// that can't be derived from registry data. Yarn fills them on install.
+	if !skipChecksum && node.Integrity != "" {
 		checksum := integrityToYarnChecksum(node.Integrity, checksumPrefix)
 		if checksum != "" {
 			b.WriteString(fmt.Sprintf("  checksum: %s\n", checksum))

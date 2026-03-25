@@ -82,9 +82,11 @@ var verificationMatrix = []verificationCase{
 	// yarn-classic: yarn 1.
 	{locksmith.FormatYarnClassic, "yarn.lock", "yarn", "1", []string{"run-yarn", "1", "install", "--frozen-lockfile"}, nil},
 
-	// yarn-berry-v4 and v5: checksum format differs from what yarn 2/3.1
-	// expects - correctness (version matching) passes but acceptance fails.
-	// TODO: fix checksum conversion for older yarn berry versions.
+	// yarn-berry-v4: yarn 2 (no --immutable, checksums need first-install update).
+	{locksmith.FormatYarnBerryV4, "yarn.lock", "yarn", "2", []string{"run-yarn", "2", "install"}, setupYarnBerry},
+
+	// yarn-berry-v5: yarn 3.1 (no --immutable, checksums need first-install update).
+	{locksmith.FormatYarnBerryV5, "yarn.lock", "yarn", "3.1", []string{"run-yarn", "3.1", "install"}, setupYarnBerry},
 
 	// yarn-berry-v6: yarn 3.
 	{locksmith.FormatYarnBerryV6, "yarn.lock", "yarn", "3", []string{"run-yarn", "3", "install", "--immutable"}, setupYarnBerry},

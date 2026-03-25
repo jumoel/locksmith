@@ -33,25 +33,26 @@ Optional flags: `--cutoff 2025-01-01` (only resolve versions published before th
 
 ## Supported formats
 
-| Format | Flag | PM versions | Tested against |
-|---|---|---|---|
-| package-lock.json v1 | `package-lock-v1` | npm 5-6 | npm 5-11 (ci) |
-| package-lock.json v2 | `package-lock-v2` | npm 7-8 | npm 7-11 (ci) |
-| package-lock.json v3 | `package-lock-v3` | npm 9+ | npm 7-11 (ci), byte-identical on 15+ fixtures |
-| npm-shrinkwrap.json | `npm-shrinkwrap` | npm 2-11 | npm 2-11 (install/ci) |
-| pnpm-lock.yaml v5.1 | `pnpm-lock-v4` | pnpm 4 | pnpm 4 (correctness) |
-| pnpm-lock.yaml v5.4 | `pnpm-lock-v5` | pnpm 7 | pnpm 7 (correctness) |
-| pnpm-lock.yaml v6.0 | `pnpm-lock-v6` | pnpm 8 | pnpm 8 (correctness) |
-| pnpm-lock.yaml v9.0 | `pnpm-lock-v9` | pnpm 9-10 | pnpm 9-10 (frozen-lockfile) |
-| yarn.lock classic | `yarn-classic` | yarn 1 | yarn 1 (frozen-lockfile) |
-| yarn.lock berry v4 | `yarn-berry-v4` | yarn 2.0 | format only |
-| yarn.lock berry v5 | `yarn-berry-v5` | yarn 2.x | format only |
-| yarn.lock berry v6 | `yarn-berry-v6` | yarn 3.0-3.4 | yarn 3 (immutable) |
-| yarn.lock berry v7 | `yarn-berry-v7` | yarn 3.5+ | format only |
-| yarn.lock berry v8 | `yarn-berry-v8` | yarn 4 | yarn 4 (immutable) |
-| bun.lock | `bun-lock` | bun 1.2+ | bun (frozen-lockfile) |
+| Format | Flag | PM versions | Correctness | Acceptance | Notes |
+|---|---|---|---|---|---|
+| package-lock.json v1 | `package-lock-v1` | npm 5-6 | npm 5, 6 | npm 6-11 (ci) | |
+| package-lock.json v2 | `package-lock-v2` | npm 7-8 | npm 7, 8 | npm 7-11 (ci) | |
+| package-lock.json v3 | `package-lock-v3` | npm 9+ | npm 7-11 | npm 7-11 (ci) | 17+ fixtures byte-identical |
+| npm-shrinkwrap.json | `npm-shrinkwrap` | npm 2-11 | npm 2-6 | npm 2, 5-11 | v1 format for max compat |
+| pnpm-lock.yaml v5.1 | `pnpm-lock-v4` | pnpm 4 | pnpm 4 | pnpm 4 | |
+| pnpm-lock.yaml v5.2-5.4 | `pnpm-lock-v5` | pnpm 5-7 | pnpm 5, 7 | pnpm 5, 6, 7 | |
+| pnpm-lock.yaml v6.0 | `pnpm-lock-v6` | pnpm 8 | pnpm 8 | pnpm 8 | |
+| pnpm-lock.yaml v9.0 | `pnpm-lock-v9` | pnpm 9-10 | pnpm 9, 10 | pnpm 9, 10 | |
+| yarn.lock classic | `yarn-classic` | yarn 1 | yarn 1 | yarn 1 | |
+| yarn.lock berry v4 | `yarn-berry-v4` | yarn 2 | yarn 2 | yarn 2 (install) | Checksums omitted* |
+| yarn.lock berry v5 | `yarn-berry-v5` | yarn 3.1 | yarn 3.1 | yarn 3.1 (install) | Checksums omitted* |
+| yarn.lock berry v6 | `yarn-berry-v6` | yarn 3.2+ | yarn 3 | yarn 3 (immutable) | |
+| yarn.lock berry v8 | `yarn-berry-v8` | yarn 4 | yarn 4 | yarn 4 (immutable) | |
+| bun.lock | `bun-lock` | bun 1.2+ | bun | bun | |
 
-**Not implemented**: pnpm lockfile v1-v3 (pnpm 1-3, requires Node 4-10, zero active usage), yarn berry v1-v3 (pre-release development artifacts).
+*\*Yarn berry v4/v5 checksums: yarn 2/3.1 compute checksums by re-packing tarballs into their internal ZIP cache format and hashing that. This hash can't be derived from registry data alone. Lockfiles are generated without checksums; yarn fills them on first `yarn install`. Yarn 3.2+ and 4 don't validate checksums.*
+
+**Not implemented**: pnpm lockfile v1-v3 (pnpm 1-3, requires Node 4-10, zero active usage), yarn berry v1-v3 (pre-release development artifacts), yarn berry v7 (no yarn version ever produced this metadata version).
 
 ## Architecture
 
