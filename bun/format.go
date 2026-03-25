@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/maputil"
 	"github.com/jumoel/locksmith/internal/orderedjson"
 )
 
@@ -36,7 +37,7 @@ func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecos
 		}
 	}
 
-	workspaceDeps := buildWorkspaceDeps(project)
+	workspaceDeps := buildWorkspaceDeps(project, result, multiVersion)
 	workspaces := orderedjson.Map{
 		{Key: "", Value: workspaceDeps},
 	}
@@ -63,23 +64,50 @@ func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecos
 	return addTrailingCommas(buf.Bytes()), nil
 }
 
-func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedjson.Map {
+func buildWorkspaceDeps(project *ecosystem.ProjectSpec, result *ResolveResult, multiVersion map[string]bool) orderedjson.Map {
 	g := ecosystem.GroupDependenciesByType(project.Dependencies)
+
+	// Build root version lookup for multi-version dep resolution.
+	rootVersions := make(map[string]string)
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil {
+				rootVersions[edge.Name] = edge.Target.Version
+			}
+		}
+	}
+
+	// resolveDepMap uses original constraints for single-version packages
+	// and resolved versions for multi-version packages. Bun's frozen mode
+	// can't do semver matching against "name@version" keys, so it needs the
+	// exact resolved version to construct the key lookup.
+	resolveDepMap := func(deps map[string]string) orderedjson.Map {
+		m := make(orderedjson.Map, 0, len(deps))
+		keys := maputil.SortedKeys(deps)
+		for _, name := range keys {
+			value := deps[name]
+			if multiVersion[name] {
+				if v, ok := rootVersions[name]; ok {
+					value = v
+				}
+			}
+			m = append(m, orderedjson.Entry{Key: name, Value: value})
+		}
+		return m
+	}
 
 	entry := orderedjson.Map{
 		{Key: "name", Value: project.Name},
 	}
 
-	// Workspace deps always use original constraints from package.json.
-	// Bun resolves them against the packages section internally.
 	if len(g.Regular) > 0 {
-		entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: orderedjson.FromStringMap(g.Regular)})
+		entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: resolveDepMap(g.Regular)})
 	}
 	if len(g.Dev) > 0 {
-		entry = append(entry, orderedjson.Entry{Key: "devDependencies", Value: orderedjson.FromStringMap(g.Dev)})
+		entry = append(entry, orderedjson.Entry{Key: "devDependencies", Value: resolveDepMap(g.Dev)})
 	}
 	if len(g.Optional) > 0 {
-		entry = append(entry, orderedjson.Entry{Key: "optionalDependencies", Value: orderedjson.FromStringMap(g.Optional)})
+		entry = append(entry, orderedjson.Entry{Key: "optionalDependencies", Value: resolveDepMap(g.Optional)})
 	}
 
 	return entry
