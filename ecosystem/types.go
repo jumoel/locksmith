@@ -21,6 +21,7 @@ type Node struct {
 	Name             string
 	Version          string
 	Integrity        string // SRI hash (sha512-...)
+	Shasum           string // SHA-1 hash of the tarball
 	TarballURL       string
 	Dependencies     []*Edge
 	DevOnly          bool

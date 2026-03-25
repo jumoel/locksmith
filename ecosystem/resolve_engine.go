@@ -187,6 +187,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		Name:             meta.Name,
 		Version:          meta.Version,
 		Integrity:        meta.Integrity,
+		Shasum:           meta.Shasum,
 		TarballURL:       meta.TarballURL,
 		HasInstallScript: meta.HasInstallScript,
 		Engines:          meta.Engines,

@@ -125,7 +125,7 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 			sortKey:      constraints[0],
 			constraints:  constraints,
 			version:      pkg.Node.Version,
-			resolvedURL:  pkg.Node.TarballURL,
+			resolvedURL:  resolvedURLWithShasum(pkg.Node.TarballURL, pkg.Node.Shasum),
 			integrity:    pkg.Node.Integrity,
 			dependencies: depConstraints,
 		}
@@ -183,6 +183,15 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 	}
 
 	return buf.Bytes(), nil
+}
+
+// resolvedURLWithShasum appends the #shasum fragment to a tarball URL.
+// Yarn classic uses this format: "https://registry.yarnpkg.com/pkg/-/pkg-1.0.0.tgz#sha1hash"
+func resolvedURLWithShasum(url, shasum string) string {
+	if shasum != "" && url != "" {
+		return url + "#" + shasum
+	}
+	return url
 }
 
 // formatConstraintKey builds the "name@constraint" key for a yarn.lock entry.
