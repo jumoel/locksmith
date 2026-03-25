@@ -97,11 +97,29 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	}
 	// PlacedNodes is keyed by path (e.g., "node_modules/foo"), not "name@version".
 	// Match by checking the embedded Node pointer's name+version.
+	removedPaths := make(map[string]bool)
 	for path, placed := range result.PlacedNodes {
 		if placed.Node != nil {
 			key := placed.Node.Name + "@" + placed.Node.Version
 			if removed[key] {
 				delete(result.PlacedNodes, path)
+				removedPaths[path] = true
+			}
+		}
+	}
+	// Also clean up Children maps in remaining PlacedNodes.
+	for _, placed := range result.PlacedNodes {
+		for childName, child := range placed.Children {
+			if removedPaths[child.Path] {
+				delete(placed.Children, childName)
+			}
+		}
+	}
+	// Clean root children too.
+	if result.Root != nil {
+		for childName, child := range result.Root.Children {
+			if removedPaths[child.Path] {
+				delete(result.Root.Children, childName)
 			}
 		}
 	}
@@ -154,6 +172,15 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 	}
 	for key := range removed {
 		delete(result.Packages, key)
+	}
+	// Also clean dep references within remaining packages.
+	for _, pkg := range result.Packages {
+		for depName := range pkg.Dependencies {
+			depKey := depName + "@" + pkg.Dependencies[depName]
+			if removed[depKey] {
+				delete(pkg.Dependencies, depName)
+			}
+		}
 	}
 
 	lockfile, err := formatter.FormatFromResult(result, spec)
@@ -211,6 +238,15 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 	for key := range removed {
 		delete(result.Packages, key)
 	}
+	// Also clean dep references within remaining yarn packages.
+	for _, pkg := range result.Packages {
+		for depName := range pkg.Dependencies {
+			depKey := depName + "@" + pkg.Dependencies[depName]
+			if removed[depKey] {
+				delete(pkg.Dependencies, depName)
+			}
+		}
+	}
 
 	lockfile, err := formatter.FormatFromResult(result, spec)
 	if err != nil {
@@ -243,6 +279,15 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	}
 	for key := range removed {
 		delete(result.Packages, key)
+	}
+	// Also clean dep references within remaining bun packages.
+	for _, pkg := range result.Packages {
+		for depName, dep := range pkg.Dependencies {
+			depKey := dep.ResolvedName + "@" + dep.ResolvedVersion
+			if removed[depKey] {
+				delete(pkg.Dependencies, depName)
+			}
+		}
 	}
 
 	lockfile, err := formatter.FormatFromResult(result, spec)
