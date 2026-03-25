@@ -78,7 +78,7 @@ func (f *YarnBerryV8Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 // FormatFromResult produces yarn.lock v8 bytes from a resolve result.
 func (f *YarnBerryV8Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 8, CacheKey: "10c0", ChecksumPrefix: "10/", IncludeRoot: true,
+		MetadataVersion: 8, CacheKey: "10c0", ChecksumPrefix: "10/", IncludeRoot: true, RootDepsNpmPrefix: true,
 	})
 }
 
@@ -92,11 +92,12 @@ type berryEntry struct {
 
 // berryConfig holds format-specific settings that differ between berry versions.
 type berryConfig struct {
-	MetadataVersion int
-	CacheKey        string
-	ChecksumPrefix  string // "10/" for v8, "" for v5-v6
-	IncludeRoot     bool   // true for yarn berry (adds workspace root entry)
-	SkipChecksum bool // v4/v5: omit checksums (yarn 2/3.1 computes cache-specific hashes)
+	MetadataVersion    int
+	CacheKey           string
+	ChecksumPrefix     string // "10/" for v8, "" for v5-v6
+	IncludeRoot        bool   // true for yarn berry (adds workspace root entry)
+	SkipChecksum       bool   // v4/v5: omit checksums (yarn 2/3.1 computes cache-specific hashes)
+	RootDepsNpmPrefix  bool   // v8: root deps use "npm:constraint" format
 }
 
 func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec, cfg berryConfig) ([]byte, error) {
@@ -133,45 +134,69 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	b.WriteString(fmt.Sprintf("  version: %d\n", cfg.MetadataVersion))
 	b.WriteString(fmt.Sprintf("  cacheKey: %s\n", cfg.CacheKey))
 
-	// Write each package entry.
+	// Build workspace root entry so it sorts with the rest.
+	type writeFunc func(b *strings.Builder)
+	type sortableEntry struct {
+		sortKey string
+		write   writeFunc
+	}
+	var allEntries []sortableEntry
+
 	for _, entry := range entries {
-		b.WriteByte('\n')
-		writeEntryKey(&b, entry.constraints)
-		writeEntryBody(&b, entry.pkg, cfg.ChecksumPrefix, cfg.SkipChecksum)
+		e := entry // capture
+		allEntries = append(allEntries, sortableEntry{
+			sortKey: e.constraints[0],
+			write: func(b *strings.Builder) {
+				writeEntryKey(b, e.constraints)
+				writeEntryBody(b, e.pkg, cfg.ChecksumPrefix, cfg.SkipChecksum)
+			},
+		})
 	}
 
-	// Write workspace root entry if enabled.
 	if cfg.IncludeRoot && project.Name != "" {
-		b.WriteByte('\n')
-		rootKey := fmt.Sprintf("%q:\n", fmt.Sprintf("%s@workspace:.", project.Name))
-		b.WriteString(rootKey)
-		// Yarn berry uses "0.0.0-use.local" for workspace root version.
-		ver := "0.0.0-use.local"
-		b.WriteString(fmt.Sprintf("  version: %s\n", ver))
-		b.WriteString(fmt.Sprintf("  resolution: \"%s@workspace:.\"\n", project.Name))
-		// Add root dependencies.
-		if len(project.Dependencies) > 0 {
-			b.WriteString("  dependencies:\n")
-			depNames := make([]string, 0, len(project.Dependencies))
-			for _, d := range project.Dependencies {
-				depNames = append(depNames, d.Name)
-			}
-			sort.Strings(depNames)
-			depMap := make(map[string]string)
-			for _, d := range project.Dependencies {
-				depMap[d.Name] = d.Constraint
-			}
-			for _, name := range depNames {
-				// Quote scoped package names (starting with @) for valid YAML.
-				yamlName := name
-				if strings.HasPrefix(name, "@") {
-					yamlName = fmt.Sprintf("%q", name)
+		rootConstraint := fmt.Sprintf("%s@workspace:.", project.Name)
+		allEntries = append(allEntries, sortableEntry{
+			sortKey: rootConstraint,
+			write: func(b *strings.Builder) {
+				b.WriteString(fmt.Sprintf("%q:\n", rootConstraint))
+				b.WriteString(fmt.Sprintf("  version: %s\n", "0.0.0-use.local"))
+				b.WriteString(fmt.Sprintf("  resolution: \"%s@workspace:.\"\n", project.Name))
+				if len(project.Dependencies) > 0 {
+					b.WriteString("  dependencies:\n")
+					depNames := make([]string, 0, len(project.Dependencies))
+					for _, d := range project.Dependencies {
+						depNames = append(depNames, d.Name)
+					}
+					sort.Strings(depNames)
+					depMap := make(map[string]string)
+					for _, d := range project.Dependencies {
+						depMap[d.Name] = d.Constraint
+					}
+					for _, name := range depNames {
+						yamlName := name
+						if strings.HasPrefix(name, "@") {
+							yamlName = fmt.Sprintf("%q", name)
+						}
+						if cfg.RootDepsNpmPrefix {
+							b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, depMap[name]))
+						} else {
+							b.WriteString(fmt.Sprintf("    %s: %s\n", yamlName, depMap[name]))
+						}
+					}
 				}
-				b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, depMap[name]))
-			}
-		}
-		b.WriteString("  languageName: unknown\n")
-		b.WriteString("  linkType: soft\n")
+				b.WriteString("  languageName: unknown\n")
+				b.WriteString("  linkType: soft\n")
+			},
+		})
+	}
+
+	sort.Slice(allEntries, func(i, j int) bool {
+		return allEntries[i].sortKey < allEntries[j].sortKey
+	})
+
+	for _, e := range allEntries {
+		b.WriteByte('\n')
+		e.write(&b)
 	}
 
 	return []byte(b.String()), nil
