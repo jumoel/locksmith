@@ -146,11 +146,12 @@ func buildPackageEntry(pkg *ResolvedPackage, multiVersion map[string]bool) []int
 		depsMap := make(orderedjson.Map, len(depNames))
 		for i, name := range depNames {
 			dep := pkg.Dependencies[name]
-			// For multi-version deps, use "name@version" key format so bun can
-			// match the dependency to the correct package entry.
+			// For multi-version deps, use the resolved version so bun can
+			// match the dependency to the correct "name@version" package key.
+			// Bun looks up by dep name + resolved version to find the key.
 			value := dep.Constraint
 			if multiVersion[dep.ResolvedName] {
-				value = dep.ResolvedName + "@" + dep.ResolvedVersion
+				value = dep.ResolvedVersion
 			}
 			depsMap[i] = orderedjson.Entry{Key: name, Value: value}
 		}
