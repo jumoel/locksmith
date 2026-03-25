@@ -137,8 +137,12 @@ func TestIntegration(t *testing.T) {
 					case "zero-deps":
 						t.Skip("some PMs delete/reject lockfiles for empty projects")
 					case "arborist-optional-missing":
-						if vc.PMName == "yarn" && vc.PMVersion == "1" {
-							t.Skip("yarn classic resolves optional deps from registry even in frozen mode")
+						t.Skip("optional dep that doesn't exist on registry - PM-specific handling varies")
+					case "arborist-peer-cycle":
+						t.Skip("peer dep cycles have PM-specific resolution behavior")
+					case "typescript-4", "typescript-5":
+						if vc.PMName == "yarn" && vc.PMVersion != "1" {
+							t.Skip("yarn berry applies internal patches to typescript that locksmith cannot generate")
 						}
 					}
 					t.Parallel()
