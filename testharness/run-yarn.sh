@@ -10,6 +10,9 @@ case "$VERSION" in
     2)
         COREPACK_HOME=/opt/corepack-yarn2 corepack yarn "$@"
         ;;
+    3.1)
+        COREPACK_HOME=/opt/corepack-yarn31 corepack yarn "$@"
+        ;;
     3)
         COREPACK_HOME=/opt/corepack-yarn3 corepack yarn "$@"
         ;;

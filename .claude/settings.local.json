@@ -76,7 +76,13 @@
       "Bash(/tmp/final_check.sh:*)",
       "Bash(bash /tmp/final_check.sh)",
       "WebFetch(domain:endoflife.date)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(while read:*)",
+      "Bash(do git:*)",
+      "Read(//Users/julian.ellehauge/work/chainguard-dev/locklib/**)",
+      "Bash(/dev/null done:*)",
+      "Bash(while ! test -f /private/tmp/claude-501/-Users-julian-ellehauge-work-chainguard-dev-locklib/2cf48bcc-9399-438e-98d2-3410dc730f7d/tasks/b337yi0hf.output)",
+      "Bash(! grep:*)"
     ]
   }
 }

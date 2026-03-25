@@ -26,7 +26,7 @@ func (f *YarnBerryV4Formatter) FormatFromResult(result *ResolveResult, project *
 	})
 }
 
-// YarnBerryV5Formatter produces yarn.lock output in yarn berry v5 format (yarn 2.x).
+// YarnBerryV5Formatter produces yarn.lock output in yarn berry v5 format (yarn 3.1.0 only).
 type YarnBerryV5Formatter struct{}
 
 func NewYarnBerryV5Formatter() *YarnBerryV5Formatter { return &YarnBerryV5Formatter{} }
@@ -57,21 +57,6 @@ func (f *YarnBerryV6Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 func (f *YarnBerryV6Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
 		MetadataVersion: 6, CacheKey: 10, ChecksumPrefix: "", IncludeRoot: true,
-	})
-}
-
-// YarnBerryV7Formatter produces yarn.lock output in yarn berry v7 format (yarn 3.5+).
-type YarnBerryV7Formatter struct{}
-
-func NewYarnBerryV7Formatter() *YarnBerryV7Formatter { return &YarnBerryV7Formatter{} }
-
-func (f *YarnBerryV7Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSpec) ([]byte, error) {
-	return nil, fmt.Errorf("use FormatFromResult for yarn berry lockfile generation")
-}
-
-func (f *YarnBerryV7Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
-	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 7, CacheKey: 10, ChecksumPrefix: "", IncludeRoot: true,
 	})
 }
 

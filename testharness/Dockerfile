@@ -42,6 +42,7 @@ RUN npm install -g yarn@1 --prefix /opt/yarn1
 # Yarn berry: install v2, v3, and v4 using separate corepack homes.
 RUN corepack enable
 RUN COREPACK_HOME=/opt/corepack-yarn2 corepack prepare yarn@2.4.3 --activate
+RUN COREPACK_HOME=/opt/corepack-yarn31 corepack prepare yarn@3.1.0 --activate
 RUN COREPACK_HOME=/opt/corepack-yarn3 corepack prepare yarn@3.8.7 --activate
 RUN COREPACK_HOME=/opt/corepack-yarn4 corepack prepare yarn@4.6.0 --activate
 

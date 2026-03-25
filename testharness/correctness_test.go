@@ -87,6 +87,7 @@ var correctnessMatrix = []correctnessCase{
 
 	// --- yarn berry ---
 	{locksmith.FormatYarnBerryV4, "yarn.lock", "yarn@2-v4", []string{"run-yarn", "2", "install"}, "yarn.lock", setupYarnBerry, nil},
+	{locksmith.FormatYarnBerryV5, "yarn.lock", "yarn@3.1-v5", []string{"run-yarn", "3.1", "install"}, "yarn.lock", setupYarnBerry, nil},
 	{locksmith.FormatYarnBerryV6, "yarn.lock", "yarn@3-v6", []string{"run-yarn", "3", "install"}, "yarn.lock", setupYarnBerry, nil},
 	{locksmith.FormatYarnBerryV8, "yarn.lock", "yarn@4-v8", []string{"run-yarn", "4", "install"}, "yarn.lock", setupYarnBerry, nil},
 

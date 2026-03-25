@@ -65,8 +65,12 @@ var verificationMatrix = []verificationCase{
 	// pnpm-lock v5.1: pnpm 4.
 	{locksmith.FormatPnpmLockV4, "pnpm-lock.yaml", "pnpm", "4", []string{"run-pnpm", "4", "install", "--frozen-lockfile"}, nil},
 
-	// pnpm-lock-v5: pnpm 7.
+	// pnpm-lock-v5: pnpm 5 and 7.
+	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm", "5", []string{"run-pnpm", "5", "install", "--frozen-lockfile"}, nil},
 	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm", "7", []string{"run-pnpm", "7", "install", "--frozen-lockfile"}, nil},
+
+	// pnpm-lock-v5: also pnpm 6 (produces lockfileVersion 5.3).
+	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm", "6", []string{"run-pnpm", "6", "install", "--frozen-lockfile"}, nil},
 
 	// pnpm-lock-v6: pnpm 8.
 	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm", "8", []string{"run-pnpm", "8", "install", "--frozen-lockfile"}, nil},
@@ -77,6 +81,10 @@ var verificationMatrix = []verificationCase{
 
 	// yarn-classic: yarn 1.
 	{locksmith.FormatYarnClassic, "yarn.lock", "yarn", "1", []string{"run-yarn", "1", "install", "--frozen-lockfile"}, nil},
+
+	// yarn-berry-v4 and v5: checksum format differs from what yarn 2/3.1
+	// expects - correctness (version matching) passes but acceptance fails.
+	// TODO: fix checksum conversion for older yarn berry versions.
 
 	// yarn-berry-v6: yarn 3.
 	{locksmith.FormatYarnBerryV6, "yarn.lock", "yarn", "3", []string{"run-yarn", "3", "install", "--immutable"}, setupYarnBerry},
