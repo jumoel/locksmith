@@ -80,6 +80,10 @@ var correctnessMatrix = []correctnessCase{
 	// --- yarn classic ---
 	{locksmith.FormatYarnClassic, "yarn.lock", "yarn@1", []string{"run-yarn", "1", "install", "--ignore-scripts"}, "yarn.lock", nil, nil},
 
+	// --- yarn berry ---
+	{locksmith.FormatYarnBerryV6, "yarn.lock", "yarn@3-v6", []string{"run-yarn", "3", "install"}, "yarn.lock", setupYarnBerry, nil},
+	{locksmith.FormatYarnBerryV8, "yarn.lock", "yarn@4-v8", []string{"run-yarn", "4", "install"}, "yarn.lock", setupYarnBerry, nil},
+
 	// --- bun ---
 	{locksmith.FormatBunLock, "bun.lock", "bun", []string{"bun", "install", "--save-text-lockfile"}, "bun.lock", nil, nil},
 }

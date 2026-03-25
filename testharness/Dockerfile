@@ -38,9 +38,13 @@ RUN npm install -g pnpm@10 --prefix /opt/pnpm10
 # Install yarn classic (v1).
 RUN npm install -g yarn@1 --prefix /opt/yarn1
 
-# Yarn berry (3 and 4) use corepack.
+# Yarn berry: install both v3 and v4 using separate corepack homes.
 RUN corepack enable
-RUN corepack prepare yarn@3.8.7 --activate
+RUN COREPACK_HOME=/opt/corepack-yarn3 corepack prepare yarn@3.8.7 --activate
+RUN COREPACK_HOME=/opt/corepack-yarn4 corepack prepare yarn@4.6.0 --activate
+
+# Install pnpm v4 for legacy lockfile v4 testing.
+RUN npm install -g pnpm@4 --prefix /opt/pnpm4
 
 # Install bun.
 RUN apt-get update && apt-get install -y curl unzip && \
