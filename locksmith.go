@@ -41,6 +41,19 @@ func Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error
 	}
 }
 
+// applyPlatformFilter parses the platform string and filters the graph,
+// returning the set of removed keys. If no platform is set, it returns nil.
+func applyPlatformFilter(graph *ecosystem.Graph, platform string) (map[string]bool, error) {
+	if platform == "" {
+		return nil, nil
+	}
+	plat, err := ecosystem.ParsePlatform(platform)
+	if err != nil {
+		return nil, err
+	}
+	return ecosystem.FilterGraphByPlatform(graph, plat), nil
+}
+
 // npmFormatter is implemented by all npm lockfile formatters.
 type npmFormatter interface {
 	FormatFromResult(result *npm.ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error)
@@ -76,6 +89,21 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	result, err := resolver.ResolveWithPlacement(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
+	}
+
+	removed, err := applyPlatformFilter(result.Graph, opts.Platform)
+	if err != nil {
+		return nil, fmt.Errorf("filtering by platform: %w", err)
+	}
+	// PlacedNodes is keyed by path (e.g., "node_modules/foo"), not "name@version".
+	// Match by checking the embedded Node pointer's name+version.
+	for path, placed := range result.PlacedNodes {
+		if placed.Node != nil {
+			key := placed.Node.Name + "@" + placed.Node.Version
+			if removed[key] {
+				delete(result.PlacedNodes, path)
+			}
+		}
 	}
 
 	lockfile, err := formatter.FormatFromResult(result, spec)
@@ -118,6 +146,14 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
+	}
+
+	removed, err := applyPlatformFilter(result.Graph, opts.Platform)
+	if err != nil {
+		return nil, fmt.Errorf("filtering by platform: %w", err)
+	}
+	for key := range removed {
+		delete(result.Packages, key)
 	}
 
 	lockfile, err := formatter.FormatFromResult(result, spec)
@@ -168,6 +204,14 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
 	}
 
+	removed, err := applyPlatformFilter(result.Graph, opts.Platform)
+	if err != nil {
+		return nil, fmt.Errorf("filtering by platform: %w", err)
+	}
+	for key := range removed {
+		delete(result.Packages, key)
+	}
+
 	lockfile, err := formatter.FormatFromResult(result, spec)
 	if err != nil {
 		return nil, fmt.Errorf("formatting lockfile: %w", err)
@@ -191,6 +235,14 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
+	}
+
+	removed, err := applyPlatformFilter(result.Graph, opts.Platform)
+	if err != nil {
+		return nil, fmt.Errorf("filtering by platform: %w", err)
+	}
+	for key := range removed {
+		delete(result.Packages, key)
 	}
 
 	lockfile, err := formatter.FormatFromResult(result, spec)

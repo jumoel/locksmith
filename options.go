@@ -71,4 +71,8 @@ type GenerateOptions struct {
 	// chosen format. Use this to match the behavior of a specific package
 	// manager version (e.g., npm 5-6 which don't auto-install peers).
 	PolicyOverride *ecosystem.ResolverPolicy
+
+	// Platform, if set, filters out packages whose OS/CPU restrictions
+	// are incompatible with the target platform. Format: "os/cpu" (e.g., "linux/x64").
+	Platform string
 }

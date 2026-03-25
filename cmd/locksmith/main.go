@@ -37,6 +37,7 @@ func generateCmd() *cobra.Command {
 		cutoffStr   string
 		registryURL string
 		outputPath  string
+		platform    string
 	)
 
 	cmd := &cobra.Command{
@@ -60,6 +61,7 @@ func generateCmd() *cobra.Command {
 				SpecFile:     specData,
 				OutputFormat: outputFormat,
 				RegistryURL:  registryURL,
+				Platform:     platform,
 			}
 			if cutoffStr != "" {
 				t, err := time.Parse(time.RFC3339, cutoffStr)
@@ -94,6 +96,7 @@ func generateCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&cutoffStr, "cutoff", "c", "", "cutoff date (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVarP(&registryURL, "registry", "r", "", "registry URL override")
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "output file path (default: stdout)")
+	cmd.Flags().StringVarP(&platform, "platform", "p", "", "target platform os/cpu (e.g., linux/x64) to filter incompatible optional deps")
 
 	_ = cmd.MarkFlagRequired("spec")
 	_ = cmd.MarkFlagRequired("format")

@@ -140,10 +140,6 @@ func TestIntegration(t *testing.T) {
 						if vc.PMName == "yarn" && vc.PMVersion == "1" {
 							t.Skip("yarn classic resolves optional deps from registry even in frozen mode")
 						}
-					case "platform-specific", "next-app", "next-12", "next-13", "next-14", "next-15", "optional-deps":
-						if vc.PMName == "yarn" && vc.PMVersion == "1" {
-							t.Skip("yarn classic rejects platform-incompatible optional deps in Docker")
-						}
 					}
 					t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion
@@ -185,11 +181,12 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 		t.Fatalf("reading fixture %s: %v", fixture, err)
 	}
 
-	// Generate lockfile.
+	// Generate lockfile targeting the Docker runner's platform (linux/x64).
 	ctx := context.Background()
 	result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
 		SpecFile:     specData,
 		OutputFormat: vc.Format,
+		Platform:     "linux/x64",
 	})
 	if err != nil {
 		t.Fatalf("Generate(%s, %s) failed: %v", vc.Format, fixture, err)
