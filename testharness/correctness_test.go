@@ -134,12 +134,21 @@ func TestCorrectness(t *testing.T) {
 	// Known incompatible combinations where the real PM can't generate a
 	// lockfile for the fixture, or where PM defaults differ from our config.
 	skipCombos := map[string]string{
-		// bun and pnpm@7 don't produce lockfiles for empty projects
-		"bun/zero-deps":       "bun deletes lockfile for empty projects",
-		"pnpm@7-v5/zero-deps": "pnpm@7 errors on empty projects",
-		// yarn@1 errors on optional deps that don't exist on the registry
-		"yarn@1/arborist-optional-missing": "yarn@1 errors on missing optional deps",
-		// pnpm@7 peer behavior is handled via PolicyOverride (noPeerAutoInstall)
+		// bun and pnpm@4-7 don't produce lockfiles for empty projects
+		"bun/zero-deps":          "bun deletes lockfile for empty projects",
+		"pnpm@4-v5.1/zero-deps": "pnpm@4 errors on empty projects",
+		"pnpm@5-v5.2/zero-deps": "pnpm@5 errors on empty projects",
+		"pnpm@6-v5.3/zero-deps": "pnpm@6 errors on empty projects",
+		"pnpm@7-v5.4/zero-deps": "pnpm@7 errors on empty projects",
+		// yarn errors on optional deps that don't exist on the registry
+		"yarn@1/arborist-optional-missing":   "yarn@1 errors on missing optional deps",
+		"yarn@2-v4/arborist-optional-missing": "yarn@2 errors on missing optional deps",
+		"yarn@3-v6/arborist-optional-missing": "yarn@3 errors on missing optional deps",
+		"yarn@4-v8/arborist-optional-missing": "yarn@4 errors on missing optional deps",
+		// yarn@2 can't resolve some newer packages
+		"yarn@2-v4/mixed-large":   "yarn@2 can't resolve some newer packages",
+		"yarn@2-v4/typescript-4":  "yarn@2 can't resolve typescript@4",
+		"yarn@2-v4/typescript-5":  "yarn@2 can't resolve typescript@5",
 	}
 
 	// npm 2-4 shrinkwrap excludes devDependencies.
