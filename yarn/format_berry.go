@@ -162,7 +162,12 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 				depMap[d.Name] = d.Constraint
 			}
 			for _, name := range depNames {
-				b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", name, depMap[name]))
+				// Quote scoped package names (starting with @) for valid YAML.
+				yamlName := name
+				if strings.HasPrefix(name, "@") {
+					yamlName = fmt.Sprintf("%q", name)
+				}
+				b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, depMap[name]))
 			}
 		}
 		b.WriteString("  languageName: unknown\n")
@@ -242,7 +247,12 @@ func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, checksumPrefix str
 		for _, name := range depNames {
 			// Find the constraint used for this dependency from the node's edges.
 			constraint := findConstraint(node, name)
-			b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", name, constraint))
+			// Quote scoped package names (starting with @) for valid YAML.
+			yamlName := name
+			if strings.HasPrefix(name, "@") {
+				yamlName = fmt.Sprintf("%q", name)
+			}
+			b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, constraint))
 		}
 	}
 
