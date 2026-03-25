@@ -47,7 +47,9 @@ func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecos
 		return nil, fmt.Errorf("encoding bun lockfile: %w", err)
 	}
 
-	return buf.Bytes(), nil
+	// Convert strict JSON to JSONC by adding trailing commas.
+	// bun.lock is JSONC format and bun's parser expects trailing commas.
+	return addTrailingCommas(buf.Bytes()), nil
 }
 
 func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedjson.Map {
@@ -141,5 +143,32 @@ func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 		metadata,
 		node.Integrity,
 	}
+}
+
+// addTrailingCommas converts strict JSON to JSONC by adding trailing commas
+// before closing braces and brackets. bun.lock requires JSONC format.
+func addTrailingCommas(data []byte) []byte {
+	var result []byte
+	for i := 0; i < len(data); i++ {
+		ch := data[i]
+		if ch == '}' || ch == ']' {
+			// Look back to find the last non-whitespace character.
+			j := len(result) - 1
+			for j >= 0 && (result[j] == ' ' || result[j] == '\t' || result[j] == '\n' || result[j] == '\r') {
+				j--
+			}
+			// Add trailing comma if the last value isn't already a comma,
+			// and isn't an opening brace/bracket (empty container).
+			if j >= 0 && result[j] != ',' && result[j] != '{' && result[j] != '[' {
+				// Insert comma after the last non-whitespace.
+				tail := make([]byte, len(result)-j-1)
+				copy(tail, result[j+1:])
+				result = append(result[:j+1], ',')
+				result = append(result, tail...)
+			}
+		}
+		result = append(result, ch)
+	}
+	return result
 }
 
