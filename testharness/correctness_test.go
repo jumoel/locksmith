@@ -225,8 +225,20 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 		t.Fatalf("locksmith Generate failed: %v", err)
 	}
 
-	// Step 2: Generate with real package manager in Docker
-	realDir := t.TempDir()
+	// Step 2: Generate with real package manager in Docker.
+	// Use a manual temp dir instead of t.TempDir() because Docker runs as
+	// root and creates files that the Go test process can't clean up.
+	realDir, err := os.MkdirTemp("", "locksmith-correctness-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		// Docker may have created root-owned files. Clean up via Docker.
+		exec.Command("docker", "run", "--rm", "--platform", "linux/amd64",
+			"-v", realDir+":/workspace", "-w", "/workspace",
+			dockerImage, "rm", "-rf", ".").CombinedOutput()
+		os.RemoveAll(realDir)
+	}()
 	if err := os.WriteFile(filepath.Join(realDir, "package.json"), specData, 0o644); err != nil {
 		t.Fatal(err)
 	}

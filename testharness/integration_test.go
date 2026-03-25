@@ -128,6 +128,11 @@ func TestIntegration(t *testing.T) {
 			for _, fixture := range allFixtures {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
+					// Skip fixtures with non-registry deps (file:, git+, etc.)
+					// since those paths don't exist in Docker.
+					if fixture == "non-registry-deps" {
+						t.Skip("non-registry deps can't be installed in Docker")
+					}
 					t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion
 					t.Run(pmTag, func(t *testing.T) {
@@ -182,7 +187,17 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 	}
 
 	// Write to temp directory for Docker mount.
-	tmpDir := t.TempDir()
+	// Use manual temp dir because Docker creates root-owned files.
+	tmpDir, err := os.MkdirTemp("", "locksmith-integration-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		exec.Command("docker", "run", "--rm", "--platform", "linux/amd64",
+			"-v", tmpDir+":/workspace", "-w", "/workspace",
+			dockerImage, "rm", "-rf", ".").CombinedOutput()
+		os.RemoveAll(tmpDir)
+	}()
 	if err := os.WriteFile(filepath.Join(tmpDir, "package.json"), specData, 0o644); err != nil {
 		t.Fatal(err)
 	}
