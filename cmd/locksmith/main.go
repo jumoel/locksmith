@@ -11,6 +11,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version is set by ldflags at build time.
+var version = "dev"
+
 func main() {
 	if err := rootCmd().Execute(); err != nil {
 		os.Exit(1)
@@ -103,7 +106,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print locksmith version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("locksmith v0.1.0")
+			fmt.Printf("locksmith %s\n", version)
 		},
 	}
 }
