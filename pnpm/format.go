@@ -76,8 +76,21 @@ func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult) *yaml.
 
 	g := ecosystem.GroupDependenciesByType(project.Dependencies)
 
-	if len(g.Regular) > 0 {
-		depsNode := buildImporterDeps(g.Regular, result, false)
+	// Merge peer deps into regular deps for the importer section.
+	// pnpm v6/v9 with autoInstallPeers expects peer deps from package.json
+	// to appear in the importer specifiers.
+	regular := make(map[string]string, len(g.Regular)+len(g.Peer))
+	for k, v := range g.Regular {
+		regular[k] = v
+	}
+	for k, v := range g.Peer {
+		if _, exists := regular[k]; !exists {
+			regular[k] = v
+		}
+	}
+
+	if len(regular) > 0 {
+		depsNode := buildImporterDeps(regular, result, false)
 		addMapping(node, "dependencies", depsNode)
 	}
 	if len(g.Dev) > 0 {
