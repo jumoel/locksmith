@@ -79,10 +79,14 @@ var correctnessMatrix = []correctnessCase{
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10-v9", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 
+	// --- pnpm v5.3: pnpm@6 (via @pnpm/exe, bundles own Node) ---
+	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@6-v5.3", []string{"run-pnpm", "6", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
+
 	// --- yarn classic ---
 	{locksmith.FormatYarnClassic, "yarn.lock", "yarn@1", []string{"run-yarn", "1", "install", "--ignore-scripts"}, "yarn.lock", nil, nil},
 
 	// --- yarn berry ---
+	{locksmith.FormatYarnBerryV4, "yarn.lock", "yarn@2-v4", []string{"run-yarn", "2", "install"}, "yarn.lock", setupYarnBerry, nil},
 	{locksmith.FormatYarnBerryV6, "yarn.lock", "yarn@3-v6", []string{"run-yarn", "3", "install"}, "yarn.lock", setupYarnBerry, nil},
 	{locksmith.FormatYarnBerryV8, "yarn.lock", "yarn@4-v8", []string{"run-yarn", "4", "install"}, "yarn.lock", setupYarnBerry, nil},
 

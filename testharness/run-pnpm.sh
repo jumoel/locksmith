@@ -3,4 +3,12 @@
 # Example: run-pnpm 9 install --frozen-lockfile
 VERSION=$1
 shift
-/opt/pnpm${VERSION}/bin/pnpm "$@"
+case "$VERSION" in
+    6)
+        # @pnpm/exe@6 installs the pnpm binary with bundled Node
+        /opt/pnpm6/bin/pnpm "$@"
+        ;;
+    *)
+        /opt/pnpm${VERSION}/bin/pnpm "$@"
+        ;;
+esac

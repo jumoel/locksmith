@@ -22,7 +22,7 @@ func (f *YarnBerryV4Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 
 func (f *YarnBerryV4Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 4, CacheKey: 8, ChecksumPrefix: "", IncludeRoot: true,
+		MetadataVersion: 4, CacheKey: 7, ChecksumPrefix: "", IncludeRoot: true,
 	})
 }
 

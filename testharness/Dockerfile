@@ -39,13 +39,17 @@ RUN npm install -g pnpm@10 --prefix /opt/pnpm10
 # Install yarn classic (v1).
 RUN npm install -g yarn@1 --prefix /opt/yarn1
 
-# Yarn berry: install both v3 and v4 using separate corepack homes.
+# Yarn berry: install v2, v3, and v4 using separate corepack homes.
 RUN corepack enable
+RUN COREPACK_HOME=/opt/corepack-yarn2 corepack prepare yarn@2.4.3 --activate
 RUN COREPACK_HOME=/opt/corepack-yarn3 corepack prepare yarn@3.8.7 --activate
 RUN COREPACK_HOME=/opt/corepack-yarn4 corepack prepare yarn@4.6.0 --activate
 
-# Install pnpm v4 for legacy lockfile v4 testing.
+# Install pnpm v4 for legacy lockfile testing.
 RUN npm install -g pnpm@4 --prefix /opt/pnpm4
+
+# pnpm@6 crashes on Node 22 - use @pnpm/exe which bundles its own Node.
+RUN npm install -g @pnpm/exe@6 --prefix /opt/pnpm6
 
 # Install bun.
 RUN apt-get update && apt-get install -y curl unzip && \
