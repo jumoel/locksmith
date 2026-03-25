@@ -22,7 +22,7 @@ func (f *YarnBerryV4Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 
 func (f *YarnBerryV4Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 4, CacheKey: 7, ChecksumPrefix: "", IncludeRoot: true, SkipChecksum: true,
+		MetadataVersion: 4, CacheKey: "7", ChecksumPrefix: "", IncludeRoot: true, SkipChecksum: true,
 	})
 }
 
@@ -37,7 +37,7 @@ func (f *YarnBerryV5Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 
 func (f *YarnBerryV5Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 5, CacheKey: 8, ChecksumPrefix: "", IncludeRoot: true, SkipChecksum: true,
+		MetadataVersion: 5, CacheKey: "8", ChecksumPrefix: "", IncludeRoot: true, SkipChecksum: true,
 	})
 }
 
@@ -56,7 +56,7 @@ func (f *YarnBerryV6Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 // FormatFromResult produces yarn.lock v6 bytes from a resolve result.
 func (f *YarnBerryV6Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 6, CacheKey: 10, ChecksumPrefix: "", IncludeRoot: true,
+		MetadataVersion: 6, CacheKey: "10", ChecksumPrefix: "", IncludeRoot: true,
 	})
 }
 
@@ -78,7 +78,7 @@ func (f *YarnBerryV8Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 // FormatFromResult produces yarn.lock v8 bytes from a resolve result.
 func (f *YarnBerryV8Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 8, CacheKey: 10, ChecksumPrefix: "10/", IncludeRoot: true,
+		MetadataVersion: 8, CacheKey: "10c0", ChecksumPrefix: "10/", IncludeRoot: true,
 	})
 }
 
@@ -93,7 +93,7 @@ type berryEntry struct {
 // berryConfig holds format-specific settings that differ between berry versions.
 type berryConfig struct {
 	MetadataVersion int
-	CacheKey        int
+	CacheKey        string
 	ChecksumPrefix  string // "10/" for v8, "" for v5-v6
 	IncludeRoot     bool   // true for yarn berry (adds workspace root entry)
 	SkipChecksum bool // v4/v5: omit checksums (yarn 2/3.1 computes cache-specific hashes)
@@ -131,7 +131,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	// Write metadata header.
 	b.WriteString("__metadata:\n")
 	b.WriteString(fmt.Sprintf("  version: %d\n", cfg.MetadataVersion))
-	b.WriteString(fmt.Sprintf("  cacheKey: %d\n", cfg.CacheKey))
+	b.WriteString(fmt.Sprintf("  cacheKey: %s\n", cfg.CacheKey))
 
 	// Write each package entry.
 	for _, entry := range entries {
@@ -162,7 +162,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 				depMap[d.Name] = d.Constraint
 			}
 			for _, name := range depNames {
-				b.WriteString(fmt.Sprintf("    %s: %s\n", name, depMap[name]))
+				b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", name, depMap[name]))
 			}
 		}
 		b.WriteString("  languageName: unknown\n")

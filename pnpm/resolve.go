@@ -57,7 +57,10 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 		resolvedDeps := make(map[string]string)
 		for _, e := range edges {
 			if e.Target != nil {
-				resolvedDeps[e.Name] = e.Target.Version
+				// Use the target's real name, not the edge's alias name.
+				// This ensures dep references match the packages section keys
+				// (e.g., "string-width" not "string-width-cjs").
+				resolvedDeps[e.Target.Name] = e.Target.Version
 			}
 		}
 		packages[key] = &ResolvedPackage{Node: node, Dependencies: resolvedDeps}

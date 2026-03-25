@@ -177,7 +177,11 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 			depNames := maputil.SortedKeys(entry.dependencies)
 			for _, depName := range depNames {
 				depConstraint := entry.dependencies[depName]
-				fmt.Fprintf(&buf, "    %s %q\n", depName, depConstraint)
+				quotedName := depName
+				if strings.HasPrefix(depName, "@") {
+					quotedName = fmt.Sprintf("%q", depName)
+				}
+				fmt.Fprintf(&buf, "    %s %q\n", quotedName, depConstraint)
 			}
 		}
 	}
@@ -200,12 +204,13 @@ func formatConstraintKey(name, constraint string) string {
 }
 
 // quoteConstraintKey wraps a constraint key in quotes if it contains
-// a scope prefix (@) or special characters that yarn classic would quote.
-// Yarn classic quotes scoped packages: "@scope/name@^1.0.0" -> "\"@scope/name@^1.0.0\""
-// Unscoped packages are left unquoted: "is-number@^6.0.0"
+// characters that yarn classic's parser can't handle unquoted.
+// Scoped packages (@scope/name@^1.0.0) and keys with spaces or special
+// characters (e.g., "^3.0.0 || ^4.0.0") must be quoted. Rather than
+// maintaining a fragile allow-list, we quote any key that contains @, spaces,
+// pipes, or other non-trivial characters.
 func quoteConstraintKey(key string) string {
-	// Scoped packages start with @ and need quoting.
-	if strings.HasPrefix(key, "@") {
+	if strings.HasPrefix(key, "@") || strings.ContainsAny(key, " |><=!") {
 		return fmt.Sprintf("%q", key)
 	}
 	return key

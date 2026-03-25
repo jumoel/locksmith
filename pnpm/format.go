@@ -77,16 +77,18 @@ func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult) *yaml.
 	g := ecosystem.GroupDependenciesByType(project.Dependencies)
 
 	if len(g.Regular) > 0 {
-		depsNode := buildImporterDeps(g.Regular, result)
+		depsNode := buildImporterDeps(g.Regular, result, false)
 		addMapping(node, "dependencies", depsNode)
 	}
 	if len(g.Dev) > 0 {
-		devNode := buildImporterDeps(g.Dev, result)
+		devNode := buildImporterDeps(g.Dev, result, false)
 		addMapping(node, "devDependencies", devNode)
 	}
 	if len(g.Optional) > 0 {
-		optNode := buildImporterDeps(g.Optional, result)
-		addMapping(node, "optionalDependencies", optNode)
+		optNode := buildImporterDeps(g.Optional, result, true)
+		if len(optNode.Content) > 0 {
+			addMapping(node, "optionalDependencies", optNode)
+		}
 	}
 
 	return node
@@ -94,7 +96,8 @@ func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult) *yaml.
 
 // buildImporterDeps constructs a dependency group within an importer entry.
 // The deps map is name -> constraint (specifier from package.json).
-func buildImporterDeps(deps map[string]string, result *ResolveResult) *yaml.Node {
+// If skipUnresolved is true, deps with no resolved version are omitted.
+func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnresolved bool) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
 	// Build a lookup from dep name to the resolved version via root edges.
@@ -112,8 +115,11 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult) *yaml.Node
 	names := maputil.SortedKeys(deps)
 
 	for _, name := range names {
-		constraint := deps[name]
 		resolvedVersion := rootVersions[name]
+		if skipUnresolved && resolvedVersion == "" {
+			continue
+		}
+		constraint := deps[name]
 
 		depNode := &yaml.Node{Kind: yaml.MappingNode}
 		addMapping(depNode, "specifier", scalarNode(constraint, 0))
@@ -376,9 +382,16 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	devDeps := g.Dev
 	optDeps := g.Optional
 
-	// specifiers: map of all dep names to their constraint from package.json.
+	// specifiers: map of non-peer dep names to their constraint from package.json.
+	// Skip peer deps (pnpm doesn't include them in specifiers) and unresolved optional deps.
 	allDeps := make(map[string]string)
 	for _, d := range project.Dependencies {
+		if d.Type == ecosystem.DepPeer {
+			continue
+		}
+		if d.Type == ecosystem.DepOptional && rootVersions[d.Name] == "" {
+			continue
+		}
 		allDeps[d.Name] = d.Constraint
 	}
 	if len(allDeps) > 0 {
@@ -410,14 +423,19 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 		addMapping(root, "devDependencies", devNode)
 	}
 
-	// optionalDependencies
+	// optionalDependencies: skip unresolved optional deps.
 	if len(optDeps) > 0 {
 		optNode := &yaml.Node{Kind: yaml.MappingNode}
 		names := maputil.SortedKeys(optDeps)
 		for _, name := range names {
+			if rootVersions[name] == "" {
+				continue
+			}
 			addMapping(optNode, name, scalarNode(rootVersions[name], 0))
 		}
-		addMapping(root, "optionalDependencies", optNode)
+		if len(optNode.Content) > 0 {
+			addMapping(root, "optionalDependencies", optNode)
+		}
 	}
 
 	// packages section with /name/version keys.
@@ -542,8 +560,15 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	g := ecosystem.GroupDependenciesByType(project.Dependencies)
 
 	// V5.1 has specifiers section (same as v5.4).
+	// Skip peer deps and unresolved optional deps.
 	allDeps := make(map[string]string)
 	for _, d := range project.Dependencies {
+		if d.Type == ecosystem.DepPeer {
+			continue
+		}
+		if d.Type == ecosystem.DepOptional && rootVersions[d.Name] == "" {
+			continue
+		}
 		allDeps[d.Name] = d.Constraint
 	}
 	if len(allDeps) > 0 {
@@ -573,9 +598,14 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	if len(g.Optional) > 0 {
 		optNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, name := range maputil.SortedKeys(g.Optional) {
+			if rootVersions[name] == "" {
+				continue
+			}
 			addMapping(optNode, name, scalarNode(rootVersions[name], 0))
 		}
-		addMapping(root, "optionalDependencies", optNode)
+		if len(optNode.Content) > 0 {
+			addMapping(root, "optionalDependencies", optNode)
+		}
 	}
 
 	packagesNode := &yaml.Node{Kind: yaml.MappingNode}
