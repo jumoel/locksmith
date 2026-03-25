@@ -1,6 +1,10 @@
-# locksmith
+<p align="center">
+  <img src="locksmith.png" alt="locksmith" width="200" />
+</p>
 
-A Go library that generates valid lockfiles from package spec files. Given a `package.json`, locksmith resolves all dependencies against the npm registry and produces a lockfile that the target package manager accepts without modification.
+<h1 align="center">locksmith</h1>
+
+<p align="center">A Go library that generates valid lockfiles from package spec files. Given a <code>package.json</code>, locksmith resolves all dependencies against the npm registry and produces a lockfile that the target package manager accepts without modification.</p>
 
 ## Usage
 
