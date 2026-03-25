@@ -53,7 +53,7 @@ RUN npm install -g pnpm@4 --prefix /opt/pnpm4
 RUN npm install -g @pnpm/exe@6 --prefix /opt/pnpm6
 
 # Install bun.
-RUN apt-get update && apt-get install -y curl unzip && \
+RUN apt-get update && apt-get install -y curl unzip git && \
     curl -fsSL https://bun.sh/install | bash && \
     ln -s /root/.bun/bin/bun /usr/local/bin/bun && \
     apt-get clean && rm -rf /var/lib/apt/lists/*

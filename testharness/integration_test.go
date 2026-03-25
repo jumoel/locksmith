@@ -202,6 +202,9 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 		t.Fatal(err)
 	}
 
+	// Copy fixture subdirectories (e.g., local packages for file: deps).
+	copyFixtureSubdirs(t, filepath.Join("fixtures", fixture), tmpDir)
+
 	// Run optional setup (e.g., .yarnrc.yml for berry).
 	if vc.SetupFunc != nil {
 		vc.SetupFunc(t, tmpDir)
@@ -227,6 +230,46 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 	t.Logf("%s %s verified %s/%s: %s",
 		vc.PMName, vc.PMVersion, vc.Format, fixture,
 		strings.TrimSpace(string(output)))
+}
+
+// copyFixtureSubdirs copies subdirectories from a fixture into the target dir.
+// This supports fixtures with local packages (file: deps) that need to exist
+// alongside package.json in the Docker mount.
+func copyFixtureSubdirs(t *testing.T, fixtureDir, targetDir string) {
+	t.Helper()
+	entries, err := os.ReadDir(fixtureDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		src := filepath.Join(fixtureDir, e.Name())
+		dst := filepath.Join(targetDir, e.Name())
+		if err := copyDir(src, dst); err != nil {
+			t.Fatalf("copying fixture subdir %s: %v", e.Name(), err)
+		}
+	}
+}
+
+// copyDir recursively copies a directory tree.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	})
 }
 
 // setupYarnBerry creates the .yarnrc.yml needed for yarn berry to use
