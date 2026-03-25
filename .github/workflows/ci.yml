@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -count=1 -short ./...
+
+  generation-tests:
+    name: Generation tests (real registry)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: go test -count=1 -timeout 10m ./testharness/
+
+  correctness-tests:
+    name: "Correctness: ${{ matrix.group }}"
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          - npm@2-shrinkwrap
+          - npm@3-shrinkwrap
+          - npm@4-shrinkwrap
+          - npm@5-shrinkwrap
+          - npm@6-shrinkwrap
+          - npm@5-v1
+          - npm@6-v1
+          - npm@7-v2
+          - npm@8-v2
+          - npm@7-v3
+          - npm@8-v3
+          - npm@9-v3
+          - npm@10-v3
+          - npm@11-v3
+          - pnpm@4-v5.1
+          - pnpm@5-v5.2
+          - pnpm@6-v5.3
+          - pnpm@7-v5.4
+          - pnpm@8-v6
+          - pnpm@9-v9
+          - pnpm@10-v9
+          - yarn@1
+          - yarn@2-v4
+          - yarn@3.1-v5
+          - yarn@3-v6
+          - yarn@4-v8
+          - bun
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build Docker test runner
+        run: docker build --platform linux/amd64 -t locksmith-test-runner testharness/
+      - name: Run correctness tests
+        run: >
+          go test -tags integration -count=1 -timeout 25m
+          -run "TestCorrectness/${{ matrix.group }}"
+          ./testharness/ -v
+
+  acceptance-tests:
+    name: "Acceptance: ${{ matrix.format }}"
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        format:
+          - package-lock-v1
+          - package-lock-v2
+          - package-lock-v3
+          - npm-shrinkwrap
+          - pnpm-lock-v4
+          - pnpm-lock-v5
+          - pnpm-lock-v6
+          - pnpm-lock-v9
+          - yarn-classic
+          - yarn-berry-v4
+          - yarn-berry-v5
+          - yarn-berry-v6
+          - yarn-berry-v8
+          - bun-lock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build Docker test runner
+        run: docker build --platform linux/amd64 -t locksmith-test-runner testharness/
+      - name: Run acceptance tests
+        run: >
+          go test -tags integration -count=1 -timeout 15m
+          -run "TestIntegration/${{ matrix.format }}"
+          ./testharness/ -v
