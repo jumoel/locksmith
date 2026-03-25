@@ -6,6 +6,39 @@
 
 <p align="center">A Go library that generates valid lockfiles from package spec files. Given a <code>package.json</code>, locksmith resolves all dependencies against the npm registry and produces a lockfile that the target package manager accepts without modification.</p>
 
+## Install
+
+### Binary (recommended)
+
+Download the latest release from [GitHub Releases](https://github.com/jumoel/locksmith/releases):
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/jumoel/locksmith/releases/latest/download/locksmith-darwin-arm64 -o locksmith
+chmod +x locksmith
+
+# macOS (Intel)
+curl -L https://github.com/jumoel/locksmith/releases/latest/download/locksmith-darwin-amd64 -o locksmith
+chmod +x locksmith
+
+# Linux (x86_64)
+curl -L https://github.com/jumoel/locksmith/releases/latest/download/locksmith-linux-amd64 -o locksmith
+chmod +x locksmith
+
+# Linux (ARM64)
+curl -L https://github.com/jumoel/locksmith/releases/latest/download/locksmith-linux-arm64 -o locksmith
+chmod +x locksmith
+
+# Windows (x86_64) - PowerShell
+Invoke-WebRequest -Uri https://github.com/jumoel/locksmith/releases/latest/download/locksmith-windows-amd64.exe -OutFile locksmith.exe
+```
+
+### From source
+
+```bash
+go install github.com/jumoel/locksmith/cmd/locksmith@latest
+```
+
 ## Usage
 
 ### As a library
@@ -145,3 +178,15 @@ steps:
 - **Edge cases**: conflicting version ranges, optional missing deps, circular peer deps, deprecated packages, platform-specific deps, aliased deps, non-registry deps, bundled deps
 - **Arborist test suite**: dedupe, dev-deps, peer-cycle, optional-missing, peer-optional (using real @isaacs/ test packages)
 - **Package managers as deps**: npm 6/10, pnpm 8/9, yarn classic
+
+## Releasing
+
+Create a new release with the version bump script:
+
+```bash
+./scripts/release.sh patch    # v0.0.1 -> v0.0.2
+./scripts/release.sh minor    # v0.0.2 -> v0.1.0
+./scripts/release.sh major    # v0.1.0 -> v1.0.0
+```
+
+This creates an annotated git tag and pushes it. GitHub Actions builds binaries for linux (amd64/arm64), macOS (amd64/arm64), and Windows (amd64), generates sha256 checksums, and publishes a release with auto-generated notes.
