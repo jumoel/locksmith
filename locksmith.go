@@ -30,7 +30,7 @@ func Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error
 	switch opts.OutputFormat {
 	case FormatPackageLockV1, FormatPackageLockV2, FormatPackageLockV3, FormatNpmShrinkwrap:
 		return generateNpm(ctx, opts)
-	case FormatPnpmLockV5, FormatPnpmLockV6, FormatPnpmLockV9:
+	case FormatPnpmLockV4, FormatPnpmLockV5, FormatPnpmLockV6, FormatPnpmLockV9:
 		return generatePnpm(ctx, opts)
 	case FormatYarnClassic, FormatYarnBerryV5, FormatYarnBerryV6, FormatYarnBerryV7, FormatYarnBerryV8:
 		return generateYarn(ctx, opts)
@@ -99,6 +99,8 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 
 	var formatter pnpmFormatter
 	switch opts.OutputFormat {
+	case FormatPnpmLockV4:
+		formatter = pnpm.NewPnpmLockV4Formatter()
 	case FormatPnpmLockV5:
 		formatter = pnpm.NewPnpmLockV5Formatter()
 	case FormatPnpmLockV6:

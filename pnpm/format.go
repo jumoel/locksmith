@@ -509,3 +509,80 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 
 	return buf.Bytes(), nil
 }
+
+// PnpmLockV4Formatter produces pnpm-lock.yaml lockfileVersion 4 output.
+// V4 is identical to V5 but with lockfileVersion 4 and no specifiers section.
+// Used by pnpm v4 (2020).
+type PnpmLockV4Formatter struct{}
+
+func NewPnpmLockV4Formatter() *PnpmLockV4Formatter { return &PnpmLockV4Formatter{} }
+
+func (f *PnpmLockV4Formatter) Format(graph *ecosystem.Graph, project *ecosystem.ProjectSpec) ([]byte, error) {
+	return nil, fmt.Errorf("use FormatFromResult for pnpm lockfile generation")
+}
+
+func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
+	doc := &yaml.Node{Kind: yaml.DocumentNode}
+	root := &yaml.Node{Kind: yaml.MappingNode}
+	doc.Content = append(doc.Content, root)
+
+	addMapping(root, "lockfileVersion", scalarNode("4", 0))
+
+	devFlags := computeDevFlags(result, project)
+
+	rootVersions := make(map[string]string)
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil {
+				rootVersions[edge.Name] = edge.Target.Version
+			}
+		}
+	}
+
+	g := ecosystem.GroupDependenciesByType(project.Dependencies)
+
+	if len(g.Regular) > 0 {
+		depsNode := &yaml.Node{Kind: yaml.MappingNode}
+		for _, name := range maputil.SortedKeys(g.Regular) {
+			addMapping(depsNode, name, scalarNode(rootVersions[name], 0))
+		}
+		addMapping(root, "dependencies", depsNode)
+	}
+
+	if len(g.Dev) > 0 {
+		devNode := &yaml.Node{Kind: yaml.MappingNode}
+		for _, name := range maputil.SortedKeys(g.Dev) {
+			addMapping(devNode, name, scalarNode(rootVersions[name], 0))
+		}
+		addMapping(root, "devDependencies", devNode)
+	}
+
+	if len(g.Optional) > 0 {
+		optNode := &yaml.Node{Kind: yaml.MappingNode}
+		for _, name := range maputil.SortedKeys(g.Optional) {
+			addMapping(optNode, name, scalarNode(rootVersions[name], 0))
+		}
+		addMapping(root, "optionalDependencies", optNode)
+	}
+
+	packagesNode := &yaml.Node{Kind: yaml.MappingNode}
+	for _, key := range maputil.SortedMapKeys(result.Packages) {
+		pkg := result.Packages[key]
+		v5Key := buildV5PackageKey(pkg.Node.Name, pkg.Node.Version)
+		pkgNode := buildInlinePackageNode(pkg, devFlags[key])
+		addMapping(packagesNode, v5Key, pkgNode)
+	}
+	addMapping(root, "packages", packagesNode)
+
+	var buf bytes.Buffer
+	encoder := yaml.NewEncoder(&buf)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(doc); err != nil {
+		return nil, fmt.Errorf("encoding pnpm lockfile v4: %w", err)
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, fmt.Errorf("closing pnpm lockfile v4 encoder: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}

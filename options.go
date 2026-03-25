@@ -17,6 +17,7 @@ const (
 	FormatNpmShrinkwrap OutputFormat = "npm-shrinkwrap"
 
 	// pnpm lockfile formats.
+	FormatPnpmLockV4 OutputFormat = "pnpm-lock-v4"
 	FormatPnpmLockV5 OutputFormat = "pnpm-lock-v5"
 	FormatPnpmLockV6 OutputFormat = "pnpm-lock-v6"
 	FormatPnpmLockV9 OutputFormat = "pnpm-lock-v9"
@@ -39,6 +40,7 @@ func AllFormats() []OutputFormat {
 		FormatPackageLockV2,
 		FormatPackageLockV3,
 		FormatNpmShrinkwrap,
+		FormatPnpmLockV4,
 		FormatPnpmLockV5,
 		FormatPnpmLockV6,
 		FormatPnpmLockV9,
