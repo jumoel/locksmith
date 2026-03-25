@@ -188,6 +188,25 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 						}
 					}
 				}
+				// dependenciesMeta: mark optional deps.
+				var optDeps []string
+				for _, d := range project.Dependencies {
+					if d.Type == ecosystem.DepOptional {
+						optDeps = append(optDeps, d.Name)
+					}
+				}
+				if len(optDeps) > 0 {
+					sort.Strings(optDeps)
+					b.WriteString("  dependenciesMeta:\n")
+					for _, name := range optDeps {
+						yamlName := name
+						if strings.HasPrefix(name, "@") {
+							yamlName = fmt.Sprintf("%q", name)
+						}
+						b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
+						b.WriteString("      optional: true\n")
+					}
+				}
 				b.WriteString("  languageName: unknown\n")
 				b.WriteString("  linkType: soft\n")
 			},
