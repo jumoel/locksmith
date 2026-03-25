@@ -77,7 +77,7 @@ func buildWorkspaceDeps(project *ecosystem.ProjectSpec, result *ResolveResult, m
 		}
 	}
 
-	// resolveDepMap returns a dep map with resolved versions for multi-version packages.
+	// resolveDepMap returns a dep map with package key references for multi-version packages.
 	resolveDepMap := func(deps map[string]string) orderedjson.Map {
 		m := make(orderedjson.Map, 0, len(deps))
 		keys := maputil.SortedKeys(deps)
@@ -85,7 +85,8 @@ func buildWorkspaceDeps(project *ecosystem.ProjectSpec, result *ResolveResult, m
 			value := deps[name]
 			if multiVersion[name] {
 				if v, ok := rootVersions[name]; ok {
-					value = v
+					// Use "name@version" format to match the package key.
+					value = name + "@" + v
 				}
 			}
 			m = append(m, orderedjson.Entry{Key: name, Value: value})
@@ -171,11 +172,11 @@ func buildPackageEntry(pkg *ResolvedPackage, multiVersion map[string]bool) []int
 		depsMap := make(orderedjson.Map, len(depNames))
 		for i, name := range depNames {
 			dep := pkg.Dependencies[name]
-			// For multi-version deps, use the resolved version so bun can
-			// match the dependency to the correct "name@version" package key.
+			// For multi-version deps, use "name@version" key format so bun can
+			// match the dependency to the correct package entry.
 			value := dep.Constraint
 			if multiVersion[dep.ResolvedName] {
-				value = dep.ResolvedVersion
+				value = dep.ResolvedName + "@" + dep.ResolvedVersion
 			}
 			depsMap[i] = orderedjson.Entry{Key: name, Value: value}
 		}
