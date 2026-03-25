@@ -52,13 +52,18 @@ var verificationMatrix = []verificationCase{
 	{locksmith.FormatPackageLockV3, "package-lock.json", "npm", "10", []string{"run-npm", "10", "ci", "--ignore-scripts"}, nil},
 	{locksmith.FormatPackageLockV3, "package-lock.json", "npm", "11", []string{"run-npm", "11", "ci", "--ignore-scripts"}, nil},
 
-	// npm-shrinkwrap: npm 6 through 11.
+	// npm-shrinkwrap: npm 2 through 11. npm 2-5 use install (no ci).
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "2", []string{"run-npm", "2", "install", "--ignore-scripts"}, nil},
+	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "5", []string{"run-npm", "5", "install", "--ignore-scripts"}, nil},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "6", []string{"run-npm", "6", "ci", "--ignore-scripts"}, nil},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "7", []string{"run-npm", "7", "ci", "--ignore-scripts"}, nil},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "8", []string{"run-npm", "8", "ci", "--ignore-scripts"}, nil},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "9", []string{"run-npm", "9", "ci", "--ignore-scripts"}, nil},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "10", []string{"run-npm", "10", "ci", "--ignore-scripts"}, nil},
 	{locksmith.FormatNpmShrinkwrap, "npm-shrinkwrap.json", "npm", "11", []string{"run-npm", "11", "ci", "--ignore-scripts"}, nil},
+
+	// pnpm-lock v5.1: pnpm 4.
+	{locksmith.FormatPnpmLockV4, "pnpm-lock.yaml", "pnpm", "4", []string{"run-pnpm", "4", "install", "--frozen-lockfile"}, nil},
 
 	// pnpm-lock-v5: pnpm 7.
 	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm", "7", []string{"run-pnpm", "7", "install", "--frozen-lockfile"}, nil},
