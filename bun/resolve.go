@@ -26,7 +26,14 @@ type ResolveResult struct {
 // ResolvedPackage holds bun-specific resolution info for a package.
 type ResolvedPackage struct {
 	Node         *ecosystem.Node
-	Dependencies map[string]string // name -> constraint (not resolved version)
+	Dependencies map[string]DepInfo // name -> dep info
+}
+
+// DepInfo holds both the constraint and the resolved version for a dependency.
+type DepInfo struct {
+	Constraint      string
+	ResolvedName    string
+	ResolvedVersion string
 }
 
 // Resolve satisfies the ecosystem.Resolver interface by returning just the graph.
@@ -54,11 +61,17 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 	}
 	// OnNodeResolved is always set by this resolver, never overridden.
 	policy.OnNodeResolved = func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
-		depConstraints := make(map[string]string)
+		deps := make(map[string]DepInfo)
 		for _, e := range edges {
-			depConstraints[e.Name] = e.Constraint // bun stores constraints
+			if e.Target != nil {
+				deps[e.Target.Name] = DepInfo{
+					Constraint:      e.Constraint,
+					ResolvedName:    e.Target.Name,
+					ResolvedVersion: e.Target.Version,
+				}
+			}
 		}
-		packages[key] = &ResolvedPackage{Node: node, Dependencies: depConstraints}
+		packages[key] = &ResolvedPackage{Node: node, Dependencies: deps}
 	}
 
 	graph, err := ecosystem.Resolve(ctx, project, registry, opts, policy)

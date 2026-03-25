@@ -25,12 +25,24 @@ func (f *BunLockFormatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSpec) 
 
 // FormatFromResult produces bun.lock bytes from a resolve result.
 func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
-	workspaceDeps := buildWorkspaceDeps(project)
+	// Detect multi-version packages for correct dep references.
+	byName := make(map[string]int)
+	for _, pkg := range result.Packages {
+		byName[pkg.Node.Name]++
+	}
+	multiVersion := make(map[string]bool)
+	for name, count := range byName {
+		if count > 1 {
+			multiVersion[name] = true
+		}
+	}
+
+	workspaceDeps := buildWorkspaceDeps(project, result, multiVersion)
 	workspaces := orderedjson.Map{
 		{Key: "", Value: workspaceDeps},
 	}
 
-	packages := buildPackages(result)
+	packages := buildPackagesFromResult(result, multiVersion)
 
 	lockfile := orderedjson.Map{
 		{Key: "lockfileVersion", Value: 1},
@@ -52,21 +64,47 @@ func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecos
 	return addTrailingCommas(buf.Bytes()), nil
 }
 
-func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedjson.Map {
+func buildWorkspaceDeps(project *ecosystem.ProjectSpec, result *ResolveResult, multiVersion map[string]bool) orderedjson.Map {
 	g := ecosystem.GroupDependenciesByType(project.Dependencies)
+
+	// Build root version lookup for multi-version dep resolution.
+	rootVersions := make(map[string]string)
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil {
+				rootVersions[edge.Name] = edge.Target.Version
+			}
+		}
+	}
+
+	// resolveDepMap returns a dep map with resolved versions for multi-version packages.
+	resolveDepMap := func(deps map[string]string) orderedjson.Map {
+		m := make(orderedjson.Map, 0, len(deps))
+		keys := maputil.SortedKeys(deps)
+		for _, name := range keys {
+			value := deps[name]
+			if multiVersion[name] {
+				if v, ok := rootVersions[name]; ok {
+					value = v
+				}
+			}
+			m = append(m, orderedjson.Entry{Key: name, Value: value})
+		}
+		return m
+	}
 
 	entry := orderedjson.Map{
 		{Key: "name", Value: project.Name},
 	}
 
 	if len(g.Regular) > 0 {
-		entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: orderedjson.FromStringMap(g.Regular)})
+		entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: resolveDepMap(g.Regular)})
 	}
 	if len(g.Dev) > 0 {
-		entry = append(entry, orderedjson.Entry{Key: "devDependencies", Value: orderedjson.FromStringMap(g.Dev)})
+		entry = append(entry, orderedjson.Entry{Key: "devDependencies", Value: resolveDepMap(g.Dev)})
 	}
 	if len(g.Optional) > 0 {
-		entry = append(entry, orderedjson.Entry{Key: "optionalDependencies", Value: orderedjson.FromStringMap(g.Optional)})
+		entry = append(entry, orderedjson.Entry{Key: "optionalDependencies", Value: resolveDepMap(g.Optional)})
 	}
 
 	return entry
@@ -77,7 +115,7 @@ func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedjson.Map {
 //
 // When only one version of a package exists, the key is the bare name.
 // When multiple versions exist, each is keyed by "name@version".
-func buildPackages(result *ResolveResult) orderedjson.Map {
+func buildPackagesFromResult(result *ResolveResult, multiVersion map[string]bool) orderedjson.Map {
 	// Group packages by name to detect multi-version cases.
 	byName := make(map[string][]*ResolvedPackage)
 	for _, pkg := range result.Packages {
@@ -109,7 +147,7 @@ func buildPackages(result *ResolveResult) orderedjson.Map {
 
 	packages := make(orderedjson.Map, 0, len(entries))
 	for _, e := range entries {
-		packages = append(packages, orderedjson.Entry{Key: e.key, Value: buildPackageEntry(e.pkg)})
+		packages = append(packages, orderedjson.Entry{Key: e.key, Value: buildPackageEntry(e.pkg, multiVersion)})
 	}
 
 	return packages
@@ -117,18 +155,29 @@ func buildPackages(result *ResolveResult) orderedjson.Map {
 
 // buildPackageEntry constructs the array for a single package:
 // [resolved-spec, "", metadata-object, integrity]
-func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
+func buildPackageEntry(pkg *ResolvedPackage, multiVersion map[string]bool) []interface{} {
 	node := pkg.Node
 	resolvedSpec := fmt.Sprintf("%s@%s", node.Name, node.Version)
 
 	// metadata object - contains dependencies if any
 	var metadata orderedjson.Map
 	if len(pkg.Dependencies) > 0 {
-		depNames := maputil.SortedKeys(pkg.Dependencies)
+		depNames := make([]string, 0, len(pkg.Dependencies))
+		for name := range pkg.Dependencies {
+			depNames = append(depNames, name)
+		}
+		sort.Strings(depNames)
 
 		depsMap := make(orderedjson.Map, len(depNames))
 		for i, name := range depNames {
-			depsMap[i] = orderedjson.Entry{Key: name, Value: pkg.Dependencies[name]}
+			dep := pkg.Dependencies[name]
+			// For multi-version deps, use the resolved version so bun can
+			// match the dependency to the correct "name@version" package key.
+			value := dep.Constraint
+			if multiVersion[dep.ResolvedName] {
+				value = dep.ResolvedVersion
+			}
+			depsMap[i] = orderedjson.Entry{Key: name, Value: value}
 		}
 		metadata = orderedjson.Map{
 			{Key: "dependencies", Value: depsMap},
