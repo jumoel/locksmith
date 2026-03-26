@@ -132,12 +132,7 @@ func TestIntegration(t *testing.T) {
 					if fixture == "aliased-dep" && vc.PMName == "npm" && vc.PMVersion == "6" {
 						t.Skip("npm 6 crashes on npm: alias syntax (fetchSpec undefined)")
 					}
-					if fixture == "non-registry-deps" && vc.PMName == "pnpm" {
-						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" || vc.PMVersion == "7" || vc.PMVersion == "8" {
-							t.Skip("pnpm 4-8 hardcodes SSH for GitHub git deps, no anonymous SSH access")
-						}
-					}
-						t.Parallel()
+							t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion
 					t.Run(pmTag, func(t *testing.T) {
 						runVerification(t, vc, fixture)

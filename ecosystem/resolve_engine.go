@@ -163,9 +163,12 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 				}
 			}
 		} else if owner, repo, ok := parseGitHubURL(actualConstraint); ok {
-			// GitHub deps - fetch version and commit hash via HTTPS API.
+			// GitHub deps - fetch version, name, and commit hash via HTTPS API.
 			if info := resolveGitHubDep(s.ctx, owner, repo); info != nil {
 				version = info.Version
+				if info.Name != "" {
+					actualName = info.Name
+				}
 				resolvedURL = fmt.Sprintf("git+https://github.com/%s/%s.git#%s", owner, repo, info.CommitHash)
 			}
 		}
@@ -355,6 +358,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 // dependency type that cannot be resolved from the npm registry.
 // gitHubDepInfo holds resolved metadata for a GitHub dependency.
 type gitHubDepInfo struct {
+	Name       string
 	Version    string
 	CommitHash string
 }
@@ -404,6 +408,7 @@ func resolveGitHubDep(ctx context.Context, owner, repo string) *gitHubDepInfo {
 	defer resp.Body.Close()
 
 	var pkg struct {
+		Name    string `json:"name"`
 		Version string `json:"version"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&pkg); err != nil {
@@ -422,7 +427,7 @@ func resolveGitHubDep(ctx context.Context, owner, repo string) *gitHubDepInfo {
 			resp2.Body.Close()
 		}
 		// Return with version but no hash.
-		return &gitHubDepInfo{Version: pkg.Version}
+		return &gitHubDepInfo{Name: pkg.Name, Version: pkg.Version}
 	}
 	defer resp2.Body.Close()
 
@@ -430,10 +435,10 @@ func resolveGitHubDep(ctx context.Context, owner, repo string) *gitHubDepInfo {
 		SHA string `json:"sha"`
 	}
 	if err := json.NewDecoder(resp2.Body).Decode(&commit); err != nil {
-		return &gitHubDepInfo{Version: pkg.Version}
+		return &gitHubDepInfo{Name: pkg.Name, Version: pkg.Version}
 	}
 
-	return &gitHubDepInfo{Version: pkg.Version, CommitHash: commit.SHA}
+	return &gitHubDepInfo{Name: pkg.Name, Version: pkg.Version, CommitHash: commit.SHA}
 }
 
 // parseTarballURL extracts the package name and version from a npm registry

@@ -426,8 +426,10 @@ func buildInlinePackageNode(pkg *ResolvedPackage, isDev bool) *yaml.Node {
 		if len(parts) > 1 {
 			hash = parts[1]
 		}
+		// Strip git+ prefix from repo URL - git doesn't understand git+https://
+		repoURL := strings.TrimPrefix(parts[0], "git+")
 		addMapping(resNode, "commit", scalarNode(hash, 0))
-		addMapping(resNode, "repo", scalarNode(parts[0], 0))
+		addMapping(resNode, "repo", scalarNode(repoURL, 0))
 		addMapping(resNode, "type", scalarNode("git", 0))
 		addMapping(pkgNode, "resolution", resNode)
 		addMapping(pkgNode, "name", scalarNode(pkg.Node.Name, 0))
@@ -605,7 +607,14 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 
 	for _, key := range keys {
 		pkg := result.Packages[key]
-		v5Key := buildV5PackageKey(pkg.Node.Name, pkg.Node.Version)
+		url := pkg.Node.TarballURL
+		var v5Key string
+		if strings.HasPrefix(url, "git+") || strings.HasPrefix(url, "file:") {
+			// Non-registry deps use pnpmPackageKey format with / prefix
+			v5Key = "/" + pnpmPackageKey(pkg)
+		} else {
+			v5Key = buildV5PackageKey(pkg.Node.Name, pkg.Node.Version)
+		}
 		pkgNode := buildInlinePackageNode(pkg, devFlags[key])
 		addMapping(packagesNode, v5Key, pkgNode)
 	}
