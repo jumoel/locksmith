@@ -248,7 +248,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 							yamlName = fmt.Sprintf("%q", name)
 						}
 						b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
-						b.WriteString("      optional: \"true\"\n")
+						b.WriteString("      optional: true\n")
 					}
 				}
 				b.WriteString("  languageName: unknown\n")
