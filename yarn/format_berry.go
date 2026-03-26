@@ -194,7 +194,12 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 								b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, constraint))
 							}
 						} else {
-							b.WriteString(fmt.Sprintf("    %s: %s\n", yamlName, constraint))
+							// Quote values containing YAML special chars (: in npm: aliases).
+							if strings.Contains(constraint, ":") {
+								b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, constraint))
+							} else {
+								b.WriteString(fmt.Sprintf("    %s: %s\n", yamlName, constraint))
+							}
 						}
 					}
 				}
