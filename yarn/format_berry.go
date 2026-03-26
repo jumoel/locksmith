@@ -185,10 +185,16 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 						if strings.HasPrefix(name, "@") {
 							yamlName = fmt.Sprintf("%q", name)
 						}
+						constraint := depMap[name]
 						if cfg.RootDepsNpmPrefix {
-							b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, depMap[name]))
+							// Don't double-prefix constraints that already start with "npm:".
+							if strings.HasPrefix(constraint, "npm:") {
+								b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, constraint))
+							} else {
+								b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, constraint))
+							}
 						} else {
-							b.WriteString(fmt.Sprintf("    %s: %s\n", yamlName, depMap[name]))
+							b.WriteString(fmt.Sprintf("    %s: %s\n", yamlName, constraint))
 						}
 					}
 				}
@@ -277,8 +283,15 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 				continue
 			}
 			targetKey := edge.Target.Name + "@" + edge.Target.Version
-			descriptor := fmt.Sprintf("%s@npm:%s", edge.Name, edge.Constraint)
-			m[targetKey] = appendUnique(m[targetKey], descriptor)
+			// Don't double-prefix constraints already starting with "npm:".
+			constraint := edge.Constraint
+			if strings.HasPrefix(constraint, "npm:") {
+				descriptor := fmt.Sprintf("%s@%s", edge.Name, constraint)
+				m[targetKey] = appendUnique(m[targetKey], descriptor)
+			} else {
+				descriptor := fmt.Sprintf("%s@npm:%s", edge.Name, constraint)
+				m[targetKey] = appendUnique(m[targetKey], descriptor)
+			}
 		}
 	}
 
