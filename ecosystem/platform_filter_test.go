@@ -182,3 +182,97 @@ func TestFilterGraphByPlatform(t *testing.T) {
 		t.Errorf("root should have 2 edges, got %d", len(graph.Root.Dependencies))
 	}
 }
+
+func TestFilterGraphByPlatform_RootOptionalDepsExempt(t *testing.T) {
+	// Root optional deps that are platform-incompatible must NOT be filtered.
+	// Package managers require them in the lockfile specifiers even when the
+	// platform does not match; the PM handles platform checks at install time.
+	darwinOnlyNode := &Node{
+		Name: "darwin-optional", Version: "1.0.0",
+		OS: []string{"darwin"},
+	}
+	win32OnlyNode := &Node{
+		Name: "win32-optional", Version: "2.0.0",
+		OS: []string{"win32"},
+	}
+	transitiveIncompatible := &Node{
+		Name: "transitive-darwin", Version: "1.0.0",
+		OS: []string{"darwin"},
+	}
+
+	graph := &Graph{
+		Root: &Node{
+			Name:    "root",
+			Version: "0.0.0",
+			Dependencies: []*Edge{
+				// Root optional dep - incompatible but should be KEPT.
+				{Name: "darwin-optional", Target: darwinOnlyNode, Type: DepOptional},
+				// Root optional dep - also incompatible, should be KEPT.
+				{Name: "win32-optional", Target: win32OnlyNode, Type: DepOptional},
+				// Non-optional root dep that has an incompatible transitive dep.
+				{Name: "transitive-darwin", Target: transitiveIncompatible, Type: DepRegular},
+			},
+		},
+		Nodes: map[string]*Node{
+			"darwin-optional@1.0.0":    darwinOnlyNode,
+			"win32-optional@2.0.0":     win32OnlyNode,
+			"transitive-darwin@1.0.0":  transitiveIncompatible,
+		},
+	}
+
+	plat := Platform{OS: "linux", CPU: "x64"}
+	removed := FilterGraphByPlatform(graph, plat)
+
+	// Root optional deps must NOT be removed despite platform mismatch.
+	if removed["darwin-optional@1.0.0"] {
+		t.Error("root optional dep darwin-optional should NOT be filtered")
+	}
+	if removed["win32-optional@2.0.0"] {
+		t.Error("root optional dep win32-optional should NOT be filtered")
+	}
+
+	// Non-optional incompatible dep SHOULD be removed.
+	if !removed["transitive-darwin@1.0.0"] {
+		t.Error("non-optional incompatible dep transitive-darwin should be filtered")
+	}
+
+	// Verify the nodes map reflects the exemption.
+	if _, ok := graph.Nodes["darwin-optional@1.0.0"]; !ok {
+		t.Error("darwin-optional should remain in graph.Nodes")
+	}
+	if _, ok := graph.Nodes["win32-optional@2.0.0"]; !ok {
+		t.Error("win32-optional should remain in graph.Nodes")
+	}
+	if _, ok := graph.Nodes["transitive-darwin@1.0.0"]; ok {
+		t.Error("transitive-darwin should be removed from graph.Nodes")
+	}
+}
+
+func TestFilterGraphByPlatform_NonOptionalRootDepsStillFiltered(t *testing.T) {
+	// Regular (non-optional) root deps that are platform-incompatible
+	// should still be filtered normally.
+	darwinRegular := &Node{
+		Name: "darwin-regular", Version: "1.0.0",
+		OS: []string{"darwin"},
+	}
+
+	graph := &Graph{
+		Root: &Node{
+			Name:    "root",
+			Version: "0.0.0",
+			Dependencies: []*Edge{
+				{Name: "darwin-regular", Target: darwinRegular, Type: DepRegular},
+			},
+		},
+		Nodes: map[string]*Node{
+			"darwin-regular@1.0.0": darwinRegular,
+		},
+	}
+
+	plat := Platform{OS: "linux", CPU: "x64"}
+	removed := FilterGraphByPlatform(graph, plat)
+
+	if !removed["darwin-regular@1.0.0"] {
+		t.Error("non-optional incompatible root dep should be filtered")
+	}
+}

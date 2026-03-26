@@ -333,6 +333,110 @@ func TestYarnClassic_NoDepsNoDependenciesSection(t *testing.T) {
 	}
 }
 
+func TestQuoteConstraintKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{
+			name: "unscoped simple package",
+			key:  "lodash@^4.17.0",
+			want: "lodash@^4.17.0",
+		},
+		{
+			name: "scoped package gets quoted (starts with @)",
+			key:  "@babel/core@^7.0.0",
+			want: `"@babel/core@^7.0.0"`,
+		},
+		{
+			name: "range with space gets quoted",
+			key:  "foo@>=1.0.0 <2.0.0",
+			want: `"foo@>=1.0.0 <2.0.0"`,
+		},
+		{
+			name: "range with || gets quoted",
+			key:  "bar@^3.0.0 || ^4.0.0",
+			want: `"bar@^3.0.0 || ^4.0.0"`,
+		},
+		{
+			name: "key with colon gets quoted",
+			key:  "alias@npm:real-pkg@^1.0.0",
+			want: `"alias@npm:real-pkg@^1.0.0"`,
+		},
+		{
+			name: "key with > gets quoted",
+			key:  "pkg@>1.0.0",
+			want: `"pkg@>1.0.0"`,
+		},
+		{
+			name: "key with = gets quoted",
+			key:  "pkg@>=1.0.0",
+			want: `"pkg@>=1.0.0"`,
+		},
+		{
+			name: "key with < gets quoted",
+			key:  "pkg@<2.0.0",
+			want: `"pkg@<2.0.0"`,
+		},
+		{
+			name: "key with ! gets quoted",
+			key:  "pkg@!1.0.0",
+			want: `"pkg@!1.0.0"`,
+		},
+		{
+			name: "simple caret unscoped not quoted",
+			key:  "is-odd@^3.0.1",
+			want: "is-odd@^3.0.1",
+		},
+		{
+			name: "simple tilde unscoped not quoted",
+			key:  "is-odd@~3.0.1",
+			want: "is-odd@~3.0.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := quoteConstraintKey(tt.key)
+			if got != tt.want {
+				t.Errorf("quoteConstraintKey(%q) = %q, want %q", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsNonRegistryConstraint(t *testing.T) {
+	tests := []struct {
+		name       string
+		constraint string
+		want       bool
+	}{
+		{"file: prefix", "file:./local", true},
+		{"link: prefix", "link:../pkg", true},
+		{"git+https prefix", "git+https://github.com/foo/bar.git", true},
+		{"git+ssh prefix", "git+ssh://git@github.com/foo/bar.git", true},
+		{"git:// prefix", "git://github.com/foo/bar.git", true},
+		{"git@ prefix", "git@github.com:foo/bar.git", true},
+		{"github: prefix", "github:owner/repo", true},
+		{"http:// prefix", "http://example.com/pkg.tgz", true},
+		{"https:// prefix", "https://registry.npmjs.org/foo/-/foo-1.0.0.tgz", true},
+		{"semver range", "^1.0.0", false},
+		{"exact version", "1.0.0", false},
+		{"star", "*", false},
+		{"empty string", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isNonRegistryConstraint(tt.constraint)
+			if got != tt.want {
+				t.Errorf("isNonRegistryConstraint(%q) = %v, want %v", tt.constraint, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestYarnClassic_TransitiveDeps(t *testing.T) {
 	reg := newMockRegistry()
 	reg.addVersion("A", "1.0.0", baseTime, map[string]string{"B": "^2.0.0"})
