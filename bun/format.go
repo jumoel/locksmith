@@ -112,9 +112,11 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 	}
 
 	// For multi-version packages, walk from root to find dependency paths.
-	// The first version encountered gets the bare name key.
-	// Other versions get path keys based on their parent chain.
+	// The first version encountered (BFS order) gets the bare name key.
+	// Other versions get path-based keys like "parent/child" or
+	// "grandparent/parent/child" to avoid collisions.
 	barePlaced := make(map[string]bool) // tracks which names have bare key
+	usedKeys := make(map[string]bool)   // tracks all used path keys to detect collisions
 	if result.Graph != nil && result.Graph.Root != nil {
 		// First, place root-level versions with bare name keys.
 		for _, edge := range result.Graph.Root.Dependencies {
@@ -133,53 +135,64 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 				entries = append(entries, keyedPkg{key: name, pkg: pkg})
 				placed[key] = true
 				barePlaced[name] = true
+				usedKeys[name] = true
 			}
 		}
 
 		// BFS to place nested versions with path keys.
-		var queue []*ecosystem.Node
+		// Track full path from root dep so we can build unique keys.
+		type walkItem struct {
+			path string // full path from root dep, e.g. "express/send"
+			node *ecosystem.Node
+		}
+		var queue []walkItem
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
-				queue = append(queue, edge.Target)
+				queue = append(queue, walkItem{path: edge.Target.Name, node: edge.Target})
 			}
 		}
 		seen := make(map[string]bool)
 		for len(queue) > 0 {
-			current := queue[0]
+			item := queue[0]
 			queue = queue[1:]
 
-			nodeKey := current.Name + "@" + current.Version
+			nodeKey := item.node.Name + "@" + item.node.Version
 			if seen[nodeKey] {
 				continue
 			}
 			seen[nodeKey] = true
 
-			for _, edge := range current.Dependencies {
+			for _, edge := range item.node.Dependencies {
 				if edge.Target == nil {
 					continue
 				}
 				childKey := edge.Target.Name + "@" + edge.Target.Version
+				childPath := item.path + "/" + edge.Target.Name
 
 				if !placed[childKey] {
 					if pkg, ok := result.Packages[childKey]; ok {
 						// First version of a multi-version package gets bare name.
-						// Check if any version of this name already has the bare key.
 						useBare := len(byName[edge.Target.Name]) > 1 && !barePlaced[edge.Target.Name]
 						if useBare {
 							entries = append(entries, keyedPkg{key: edge.Target.Name, pkg: pkg})
 							barePlaced[edge.Target.Name] = true
+							usedKeys[edge.Target.Name] = true
 						} else {
-							// Bun uses "immediate-parent/package" as the key
-							// for non-default versions of multi-version packages,
-							// NOT the full path from root.
-							pathKey := current.Name + "/" + edge.Target.Name
+							// Try immediate parent/child first; if that
+							// would collide with an existing key, use the
+							// full path from the root dep.
+							pathKey := item.node.Name + "/" + edge.Target.Name
+							if usedKeys[pathKey] {
+								pathKey = childPath
+							}
 							entries = append(entries, keyedPkg{key: pathKey, pkg: pkg})
+							usedKeys[pathKey] = true
 						}
 						placed[childKey] = true
 					}
 				}
 
-				queue = append(queue, edge.Target)
+				queue = append(queue, walkItem{path: childPath, node: edge.Target})
 			}
 		}
 	}
@@ -232,6 +245,23 @@ func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 		metadata = append(metadata, orderedjson.Entry{
 			Key: "peerDependencies", Value: orderedjson.FromStringMap(pkg.PeerDeps),
 		})
+	}
+
+	// optionalPeers lists peer deps that are optional (from peerDependenciesMeta).
+	// Bun requires this to know which peer deps can be skipped.
+	if len(pkg.PeerDepsMeta) > 0 {
+		var optionalPeers []string
+		for name, meta := range pkg.PeerDepsMeta {
+			if meta.Optional {
+				optionalPeers = append(optionalPeers, name)
+			}
+		}
+		if len(optionalPeers) > 0 {
+			sort.Strings(optionalPeers)
+			metadata = append(metadata, orderedjson.Entry{
+				Key: "optionalPeers", Value: optionalPeers,
+			})
+		}
 	}
 
 	if len(pkg.Bin) > 0 {

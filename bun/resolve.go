@@ -26,10 +26,11 @@ type ResolveResult struct {
 // ResolvedPackage holds bun-specific resolution info for a package.
 type ResolvedPackage struct {
 	Node             *ecosystem.Node
-	Dependencies     map[string]DepInfo // name -> dep info
-	PeerDeps         map[string]string  // name -> constraint (from registry metadata)
-	OptionalDeps     map[string]string  // name -> constraint (from registry metadata)
-	Bin              map[string]string  // bin entries from registry metadata
+	Dependencies     map[string]DepInfo            // name -> dep info
+	PeerDeps         map[string]string             // name -> constraint (from registry metadata)
+	PeerDepsMeta     map[string]ecosystem.PeerDepMeta // peer dep metadata (optional flags)
+	OptionalDeps     map[string]string             // name -> constraint (from registry metadata)
+	Bin              map[string]string             // bin entries from registry metadata
 	HasInstallScript bool
 }
 
@@ -68,9 +69,15 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 		deps := make(map[string]DepInfo)
 		for _, e := range edges {
 			if e.Target != nil {
-				// Skip peer dep edges - bun doesn't auto-install optional
-				// peers and handles peer resolution internally.
+				// Skip peer dep edges - bun lists peer deps separately
+				// in the peerDependencies metadata field.
 				if e.Type == ecosystem.DepPeer {
+					continue
+				}
+				// Skip optional dep edges - bun lists optional deps
+				// separately in the optionalDependencies metadata field
+				// using the original constraints from registry metadata.
+				if e.Type == ecosystem.DepOptional {
 					continue
 				}
 				deps[e.Target.Name] = DepInfo{
@@ -83,6 +90,9 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 		pkg := &ResolvedPackage{Node: node, Dependencies: deps}
 		if len(meta.PeerDeps) > 0 {
 			pkg.PeerDeps = meta.PeerDeps
+		}
+		if len(meta.PeerDepsMeta) > 0 {
+			pkg.PeerDepsMeta = meta.PeerDepsMeta
 		}
 		if len(meta.OptionalDeps) > 0 {
 			pkg.OptionalDeps = meta.OptionalDeps
