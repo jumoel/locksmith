@@ -4,7 +4,8 @@
   "dependencies": {
     "ms": "^2.1.0",
     "local-pkg": "file:./local-pkg",
-    "git-pkg": "github:sindresorhus/is-odd",
+    "git-pkg": "github:jonschlinkert/is-odd",
+    "git-ssh-pkg": "git+ssh://git@github.com/jonschlinkert/is-even.git",
     "tarball-pkg": "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz"
   }
 }

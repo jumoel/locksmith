@@ -212,14 +212,12 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 		vc.SetupFunc(t, tmpDir)
 	}
 
-	// Run package manager in Docker. Pass GITHUB_TOKEN for git dep auth.
+	// Run package manager in Docker.
 	args := []string{
 		"run", "--rm",
 		"--platform", "linux/amd64",
 		"-v", tmpDir + ":/workspace",
 		"-w", "/workspace",
-		"-e", "GITHUB_TOKEN",
-		"-e", "GIT_TERMINAL_PROMPT=0",
 		dockerImage,
 	}
 	args = append(args, vc.Command...)

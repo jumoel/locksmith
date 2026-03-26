@@ -63,11 +63,10 @@ RUN mkdir -p /root/.ssh && \
     ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && \
     chmod 600 /root/.ssh/known_hosts
 
-# npm always converts GitHub git URLs to SSH. Rewrite SSH back to HTTPS
-# and use a credential helper that supplies GITHUB_TOKEN (available in
-# GitHub Actions CI) for anonymous access to public repos.
-RUN git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" && \
-    git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN:-}"; }; f'
+# npm converts GitHub git URLs to SSH. Rewrite SSH to HTTPS so public
+# repos can be cloned anonymously without SSH keys.
+RUN git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+ENV GIT_TERMINAL_PROMPT=0
 
 
 # Helper scripts for version-switching.

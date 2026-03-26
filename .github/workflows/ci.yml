@@ -112,8 +112,6 @@ jobs:
       - name: Build Docker test runner
         run: docker build --platform linux/amd64 -t locksmith-test-runner testharness/
       - name: Run acceptance tests
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           go test -tags integration -count=1 -timeout 15m
           -run "TestIntegration/${{ matrix.format }}"
