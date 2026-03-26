@@ -155,14 +155,22 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 		targetName := rootTargetNames[name]
 
 		if strings.HasPrefix(tarballURL, "file:") {
-			// file: deps use the specifier as the version.
-			versionValue = tarballURL
-		} else if strings.HasPrefix(tarballURL, "git+") {
-			// git deps use the full git URL with commit as the version.
-			versionValue = targetName + "@" + tarballURL
-		} else if strings.HasPrefix(constraint, "github:") {
-			// github: shorthand - pnpm converts to git+https format.
-			versionValue = targetName + "@" + tarballURL
+			// file: deps use "file:path" (without ./ prefix for v6).
+			path := strings.TrimPrefix(tarballURL, "file:")
+			path = strings.TrimPrefix(path, "./")
+			if useV6Key {
+				versionValue = "file:" + path
+			} else {
+				versionValue = tarballURL
+			}
+		} else if strings.HasPrefix(tarballURL, "git+") || strings.HasPrefix(constraint, "github:") {
+			// git deps: v6 uses github.com/owner/repo/hash, v9 uses name@git+url#hash.
+			if useV6Key {
+				// Extract github.com/owner/repo/hash from the git URL.
+				versionValue = gitDepV6Key(tarballURL)
+			} else {
+				versionValue = targetName + "@" + tarballURL
+			}
 		} else if tarballURL != "" && strings.HasPrefix(tarballURL, "https://") && resolvedVersion == "0.0.0-local" {
 			// tarball URL deps - use the resolved real name@version.
 			versionValue = targetName + "@" + resolvedVersion
@@ -364,6 +372,21 @@ func walkDeps(node *ecosystem.Node, isDev bool, devSet, nonDevSet map[string]boo
 	}
 }
 
+// gitDepV6Key converts a git+ssh URL to pnpm v6's key format:
+// github.com/owner/repo/HASH
+func gitDepV6Key(tarballURL string) string {
+	// git+ssh://git@github.com/owner/repo.git#hash -> github.com/owner/repo/hash
+	url := tarballURL
+	for _, prefix := range []string{"git+ssh://git@", "git+https://"} {
+		url = strings.TrimPrefix(url, prefix)
+	}
+	url = strings.TrimSuffix(url, ".git")
+	// Replace # with /
+	url = strings.Replace(url, "#", "/", 1)
+	// Handle .git suffix before hash
+	return url
+}
+
 // buildV5PackageKey produces a v5 package path: /name/version for regular
 // packages, /@scope/name/version for scoped packages.
 func buildV5PackageKey(name, version string) string {
@@ -394,10 +417,36 @@ func flowMapping(pairs ...string) *yaml.Node {
 func buildInlinePackageNode(pkg *ResolvedPackage, isDev bool) *yaml.Node {
 	pkgNode := &yaml.Node{Kind: yaml.MappingNode}
 
-	// resolution: {integrity: sha512-...}
-	resNode := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
-	addMapping(resNode, "integrity", scalarNode(pkg.Node.Integrity, 0))
-	addMapping(pkgNode, "resolution", resNode)
+	url := pkg.Node.TarballURL
+	if strings.HasPrefix(url, "git+ssh://") || strings.HasPrefix(url, "git+https://") {
+		// Git dep resolution: {commit: HASH, repo: URL, type: git}
+		resNode := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
+		parts := strings.SplitN(url, "#", 2)
+		hash := ""
+		if len(parts) > 1 {
+			hash = parts[1]
+		}
+		addMapping(resNode, "commit", scalarNode(hash, 0))
+		addMapping(resNode, "repo", scalarNode(parts[0], 0))
+		addMapping(resNode, "type", scalarNode("git", 0))
+		addMapping(pkgNode, "resolution", resNode)
+		addMapping(pkgNode, "name", scalarNode(pkg.Node.Name, 0))
+		addMapping(pkgNode, "version", scalarNode(pkg.Node.Version, 0))
+	} else if strings.HasPrefix(url, "file:") {
+		// File dep resolution: {directory: path, type: directory}
+		path := strings.TrimPrefix(url, "file:")
+		path = strings.TrimPrefix(path, "./")
+		resNode := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
+		addMapping(resNode, "directory", scalarNode(path, 0))
+		addMapping(resNode, "type", scalarNode("directory", 0))
+		addMapping(pkgNode, "resolution", resNode)
+		addMapping(pkgNode, "name", scalarNode(pkg.Node.Name, 0))
+	} else {
+		// Regular dep resolution: {integrity: sha512-...}
+		resNode := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
+		addMapping(resNode, "integrity", scalarNode(pkg.Node.Integrity, 0))
+		addMapping(pkgNode, "resolution", resNode)
+	}
 
 	// engines: {node: '>=4'}
 	if len(pkg.Node.Engines) > 0 {
@@ -621,9 +670,22 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 
 	for _, key := range keys {
 		pkg := result.Packages[key]
-		v6Key := buildV6PackageKey(pkg.Node.Name, pkg.Node.Version)
+		// Use special keys for non-registry deps, v6 key format for regular.
+		url := pkg.Node.TarballURL
+		var pkgKey string
+		if strings.HasPrefix(url, "git+") {
+			// v6 git key: github.com/owner/repo/hash (no leading /)
+			pkgKey = gitDepV6Key(url)
+		} else if strings.HasPrefix(url, "file:") {
+			// v6 file key: file:path (no leading /, no name@ prefix)
+			path := strings.TrimPrefix(url, "file:")
+			path = strings.TrimPrefix(path, "./")
+			pkgKey = "file:" + path
+		} else {
+			pkgKey = buildV6PackageKey(pkg.Node.Name, pkg.Node.Version)
+		}
 		pkgNode := buildInlinePackageNode(pkg, devFlags[key])
-		addMapping(packagesNode, v6Key, pkgNode)
+		addMapping(packagesNode, pkgKey, pkgNode)
 	}
 	addMapping(root, "packages", packagesNode)
 
