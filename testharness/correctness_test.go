@@ -141,11 +141,9 @@ func TestCorrectness(t *testing.T) {
 		"pnpm@5-v5.2/zero-deps": "pnpm@5 errors on empty projects",
 		"pnpm@6-v5.3/zero-deps": "pnpm@6 errors on empty projects",
 		"pnpm@7-v5.4/zero-deps": "pnpm@7 errors on empty projects",
-		// yarn errors on optional deps that don't exist on the registry
-		"yarn@1/arborist-optional-missing":   "yarn@1 errors on missing optional deps",
-		"yarn@2-v4/arborist-optional-missing": "yarn@2 errors on missing optional deps",
-		"yarn@3-v6/arborist-optional-missing": "yarn@3 errors on missing optional deps",
-		"yarn@4-v8/arborist-optional-missing": "yarn@4 errors on missing optional deps",
+		// npm@2 excludes platform-incompatible optional deps from shrinkwrap
+		// but locksmith includes them (no platform filter in correctness tests)
+		"npm@2-shrinkwrap/arborist-optional-missing": "npm@2 excludes platform-incompatible optional deps",
 		// yarn@2 can't resolve some newer packages
 		"yarn@2-v4/mixed-large":   "yarn@2 can't resolve some newer packages",
 		"yarn@2-v4/typescript-4":  "yarn@2 can't resolve typescript@4",
