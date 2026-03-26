@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/jumoel/locksmith/ecosystem"
-	"github.com/jumoel/locksmith/internal/maputil"
 	"github.com/jumoel/locksmith/internal/orderedjson"
 )
 
@@ -25,24 +24,12 @@ func (f *BunLockFormatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSpec) 
 
 // FormatFromResult produces bun.lock bytes from a resolve result.
 func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
-	// Detect multi-version packages for correct dep references.
-	byName := make(map[string]int)
-	for _, pkg := range result.Packages {
-		byName[pkg.Node.Name]++
-	}
-	multiVersion := make(map[string]bool)
-	for name, count := range byName {
-		if count > 1 {
-			multiVersion[name] = true
-		}
-	}
-
-	workspaceDeps := buildWorkspaceDeps(project, result, multiVersion)
+	workspaceDeps := buildWorkspaceDeps(project)
 	workspaces := orderedjson.Map{
 		{Key: "", Value: workspaceDeps},
 	}
 
-	packages := buildPackagesFromResult(result, multiVersion)
+	packages := buildPackagesFromGraph(result)
 
 	lockfile := orderedjson.Map{
 		{Key: "lockfileVersion", Value: 1},
@@ -64,95 +51,138 @@ func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecos
 	return addTrailingCommas(buf.Bytes()), nil
 }
 
-func buildWorkspaceDeps(project *ecosystem.ProjectSpec, result *ResolveResult, multiVersion map[string]bool) orderedjson.Map {
+func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedjson.Map {
 	g := ecosystem.GroupDependenciesByType(project.Dependencies)
-
-	// Build root version lookup for multi-version dep resolution.
-	rootVersions := make(map[string]string)
-	if result.Graph != nil && result.Graph.Root != nil {
-		for _, edge := range result.Graph.Root.Dependencies {
-			if edge.Target != nil {
-				rootVersions[edge.Name] = edge.Target.Version
-			}
-		}
-	}
-
-	// resolveDepMap uses original constraints for single-version packages
-	// and resolved versions for multi-version packages. Bun's frozen mode
-	// can't do semver matching against "name@version" keys, so it needs the
-	// exact resolved version to construct the key lookup.
-	resolveDepMap := func(deps map[string]string) orderedjson.Map {
-		m := make(orderedjson.Map, 0, len(deps))
-		keys := maputil.SortedKeys(deps)
-		for _, name := range keys {
-			value := deps[name]
-			if multiVersion[name] {
-				if v, ok := rootVersions[name]; ok {
-					value = v
-				}
-			}
-			m = append(m, orderedjson.Entry{Key: name, Value: value})
-		}
-		return m
-	}
 
 	entry := orderedjson.Map{
 		{Key: "name", Value: project.Name},
 	}
 
+	// Workspace deps always use original constraints from package.json.
 	if len(g.Regular) > 0 {
-		entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: resolveDepMap(g.Regular)})
+		entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: orderedjson.FromStringMap(g.Regular)})
 	}
 	if len(g.Dev) > 0 {
-		entry = append(entry, orderedjson.Entry{Key: "devDependencies", Value: resolveDepMap(g.Dev)})
+		entry = append(entry, orderedjson.Entry{Key: "devDependencies", Value: orderedjson.FromStringMap(g.Dev)})
 	}
 	if len(g.Optional) > 0 {
-		entry = append(entry, orderedjson.Entry{Key: "optionalDependencies", Value: resolveDepMap(g.Optional)})
+		entry = append(entry, orderedjson.Entry{Key: "optionalDependencies", Value: orderedjson.FromStringMap(g.Optional)})
 	}
-	// Peer deps are not included in workspace deps - bun doesn't auto-install
-	// optional peers and handles peer resolution internally.
 
 	return entry
 }
 
-// buildPackages constructs the packages map. Each entry maps a package key
-// to an array: [resolved-spec, "", {dependencies: {...}}, integrity]
+// buildPackagesFromGraph walks the dependency graph to build bun.lock's
+// packages section using hierarchical path keys.
 //
-// When only one version of a package exists, the key is the bare name.
-// When multiple versions exist, each is keyed by "name@version".
-func buildPackagesFromResult(result *ResolveResult, multiVersion map[string]bool) orderedjson.Map {
-	// Group packages by name to detect multi-version cases.
-	byName := make(map[string][]*ResolvedPackage)
+// Bun uses bare package names as keys when only one version exists.
+// When multiple versions of a package exist, the root-level version gets
+// the bare name key, and nested versions get path keys like "parent/name"
+// reflecting the dependency chain that leads to them.
+func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
+	// First pass: find which names have multiple versions.
+	byName := make(map[string]map[string]*ResolvedPackage) // name -> version -> pkg
 	for _, pkg := range result.Packages {
-		byName[pkg.Node.Name] = append(byName[pkg.Node.Name], pkg)
+		name := pkg.Node.Name
+		if byName[name] == nil {
+			byName[name] = make(map[string]*ResolvedPackage)
+		}
+		byName[name][pkg.Node.Version] = pkg
 	}
 
-	// Build keyed entries: bare name for single-version, name@version for multi.
+	// For single-version packages, key is the bare name.
+	// For multi-version packages, we need to walk the graph to find the path.
 	type keyedPkg struct {
 		key string
 		pkg *ResolvedPackage
 	}
 	var entries []keyedPkg
-	for name, pkgs := range byName {
-		if len(pkgs) == 1 {
-			entries = append(entries, keyedPkg{key: name, pkg: pkgs[0]})
-		} else {
-			for _, pkg := range pkgs {
-				entries = append(entries, keyedPkg{
-					key: fmt.Sprintf("%s@%s", name, pkg.Node.Version),
-					pkg: pkg,
-				})
+
+	// Track which multi-version packages have been placed (by name@version).
+	placed := make(map[string]bool)
+
+	// Place single-version packages first with bare name keys.
+	for name, versions := range byName {
+		if len(versions) == 1 {
+			for _, pkg := range versions {
+				entries = append(entries, keyedPkg{key: name, pkg: pkg})
+				placed[name+"@"+pkg.Node.Version] = true
 			}
 		}
 	}
 
+	// For multi-version packages, walk from root to find dependency paths.
+	// The version that the root depends on gets the bare name.
+	// Other versions get path keys based on their parent chain.
+	if result.Graph != nil && result.Graph.Root != nil {
+		// First, place root-level versions with bare name keys.
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target == nil {
+				continue
+			}
+			name := edge.Target.Name
+			if len(byName[name]) <= 1 {
+				continue // already placed as single-version
+			}
+			key := name + "@" + edge.Target.Version
+			if placed[key] {
+				continue
+			}
+			if pkg, ok := result.Packages[key]; ok {
+				entries = append(entries, keyedPkg{key: name, pkg: pkg})
+				placed[key] = true
+			}
+		}
+
+		// BFS to place nested versions with path keys.
+		type walkItem struct {
+			parentPath string
+			node       *ecosystem.Node
+		}
+		var queue []walkItem
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil {
+				queue = append(queue, walkItem{parentPath: edge.Target.Name, node: edge.Target})
+			}
+		}
+		seen := make(map[string]bool)
+		for len(queue) > 0 {
+			item := queue[0]
+			queue = queue[1:]
+
+			nodeKey := item.node.Name + "@" + item.node.Version
+			if seen[nodeKey] {
+				continue
+			}
+			seen[nodeKey] = true
+
+			for _, edge := range item.node.Dependencies {
+				if edge.Target == nil {
+					continue
+				}
+				childKey := edge.Target.Name + "@" + edge.Target.Version
+				childPath := item.parentPath + "/" + edge.Target.Name
+
+				if !placed[childKey] {
+					if pkg, ok := result.Packages[childKey]; ok {
+						entries = append(entries, keyedPkg{key: childPath, pkg: pkg})
+						placed[childKey] = true
+					}
+				}
+
+				queue = append(queue, walkItem{parentPath: childPath, node: edge.Target})
+			}
+		}
+	}
+
+	// Sort entries by key.
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].key < entries[j].key
 	})
 
 	packages := make(orderedjson.Map, 0, len(entries))
 	for _, e := range entries {
-		packages = append(packages, orderedjson.Entry{Key: e.key, Value: buildPackageEntry(e.pkg, multiVersion)})
+		packages = append(packages, orderedjson.Entry{Key: e.key, Value: buildPackageEntry(e.pkg)})
 	}
 
 	return packages
@@ -160,7 +190,7 @@ func buildPackagesFromResult(result *ResolveResult, multiVersion map[string]bool
 
 // buildPackageEntry constructs the array for a single package:
 // [resolved-spec, "", metadata-object, integrity]
-func buildPackageEntry(pkg *ResolvedPackage, multiVersion map[string]bool) []interface{} {
+func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 	node := pkg.Node
 	resolvedSpec := fmt.Sprintf("%s@%s", node.Name, node.Version)
 
@@ -176,14 +206,8 @@ func buildPackageEntry(pkg *ResolvedPackage, multiVersion map[string]bool) []int
 		depsMap := make(orderedjson.Map, len(depNames))
 		for i, name := range depNames {
 			dep := pkg.Dependencies[name]
-			// For multi-version deps, use the resolved version so bun can
-			// match the dependency to the correct "name@version" package key.
-			// Bun looks up by dep name + resolved version to find the key.
-			value := dep.Constraint
-			if multiVersion[dep.ResolvedName] {
-				value = dep.ResolvedVersion
-			}
-			depsMap[i] = orderedjson.Entry{Key: name, Value: value}
+			// Always use the original constraint for dependency values.
+			depsMap[i] = orderedjson.Entry{Key: name, Value: dep.Constraint}
 		}
 		metadata = orderedjson.Map{
 			{Key: "dependencies", Value: depsMap},
@@ -226,4 +250,3 @@ func addTrailingCommas(data []byte) []byte {
 	}
 	return result
 }
-
