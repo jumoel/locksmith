@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/internal/maputil"
@@ -125,14 +126,16 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 	useV6Key := len(v6KeyFormat) > 0 && v6KeyFormat[0]
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
-	// Build lookups from dep name to resolved version and target name via root edges.
+	// Build lookups from dep name to resolved info via root edges.
 	rootVersions := make(map[string]string)
 	rootTargetNames := make(map[string]string)
+	rootTarballURLs := make(map[string]string)
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
 				rootVersions[edge.Name] = edge.Target.Version
 				rootTargetNames[edge.Name] = edge.Target.Name
+				rootTarballURLs[edge.Name] = edge.Target.TarballURL
 			}
 		}
 	}
@@ -146,11 +149,25 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 		}
 		constraint := deps[name]
 
-		// For aliases (dep name != target name), use targetName@version format.
-		// v6 uses /targetName@version (with leading /).
+		// Determine the version value for the importer entry.
 		versionValue := resolvedVersion
+		tarballURL := rootTarballURLs[name]
 		targetName := rootTargetNames[name]
-		if targetName != "" && targetName != name {
+
+		if strings.HasPrefix(tarballURL, "file:") {
+			// file: deps use the specifier as the version.
+			versionValue = tarballURL
+		} else if strings.HasPrefix(tarballURL, "git+") {
+			// git deps use the full git URL with commit as the version.
+			versionValue = targetName + "@" + tarballURL
+		} else if strings.HasPrefix(constraint, "github:") {
+			// github: shorthand - pnpm converts to git+https format.
+			versionValue = targetName + "@" + tarballURL
+		} else if tarballURL != "" && strings.HasPrefix(tarballURL, "https://") && resolvedVersion == "0.0.0-local" {
+			// tarball URL deps - use the resolved real name@version.
+			versionValue = targetName + "@" + resolvedVersion
+		} else if targetName != "" && targetName != name {
+			// Aliases: use targetName@version format.
 			if useV6Key {
 				versionValue = "/" + targetName + "@" + resolvedVersion
 			} else {
@@ -167,6 +184,21 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 	return node
 }
 
+// pnpmPackageKey returns the pnpm v9 package key for a resolved package.
+// For git deps: name@git+https://...#hash
+// For file: deps: name@file:path
+// For regular deps: name@version
+func pnpmPackageKey(pkg *ResolvedPackage) string {
+	url := pkg.Node.TarballURL
+	if strings.HasPrefix(url, "git+") {
+		return pkg.Node.Name + "@" + url
+	}
+	if strings.HasPrefix(url, "file:") {
+		return pkg.Node.Name + "@" + url
+	}
+	return pkg.Node.Name + "@" + pkg.Node.Version
+}
+
 // buildPackages constructs the packages section with resolution info only.
 func buildPackages(result *ResolveResult) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
@@ -177,10 +209,40 @@ func buildPackages(result *ResolveResult) *yaml.Node {
 		pkg := result.Packages[key]
 		pkgNode := &yaml.Node{Kind: yaml.MappingNode}
 
-		// resolution
+		// resolution - varies by dep type.
+		url := pkg.Node.TarballURL
 		resolution := &yaml.Node{Kind: yaml.MappingNode}
-		addMapping(resolution, "integrity", scalarNode(pkg.Node.Integrity, 0))
-		addMapping(pkgNode, "resolution", resolution)
+		if strings.HasPrefix(url, "git+ssh://") || strings.HasPrefix(url, "git+https://") {
+			// Git dep: {commit: HASH, repo: URL, type: git}
+			parts := strings.SplitN(url, "#", 2)
+			repo := strings.TrimPrefix(parts[0], "git+ssh://git@github.com/")
+			repo = strings.TrimPrefix(repo, "git+https://")
+			if strings.Contains(parts[0], "github.com") {
+				repo = "https://github.com/" + strings.TrimPrefix(repo, "github.com/")
+			} else {
+				repo = strings.TrimPrefix(parts[0], "git+")
+			}
+			hash := ""
+			if len(parts) > 1 {
+				hash = parts[1]
+			}
+			addMapping(resolution, "commit", scalarNode(hash, 0))
+			addMapping(resolution, "repo", scalarNode(repo, 0))
+			addMapping(resolution, "type", scalarNode("git", 0))
+			addMapping(pkgNode, "resolution", resolution)
+			addMapping(pkgNode, "version", scalarNode(pkg.Node.Version, 0))
+		} else if strings.HasPrefix(url, "file:") {
+			// File dep: {directory: path, type: directory}
+			path := strings.TrimPrefix(url, "file:")
+			addMapping(resolution, "directory", scalarNode(path, 0))
+			addMapping(resolution, "type", scalarNode("directory", 0))
+			addMapping(pkgNode, "resolution", resolution)
+		} else {
+			addMapping(resolution, "integrity", scalarNode(pkg.Node.Integrity, 0))
+			addMapping(pkgNode, "resolution", resolution)
+		}
+
+		displayKey := pnpmPackageKey(pkg)
 
 		if len(pkg.Node.Engines) > 0 {
 			enginesNode := &yaml.Node{Kind: yaml.MappingNode}
@@ -199,7 +261,7 @@ func buildPackages(result *ResolveResult) *yaml.Node {
 			addMapping(pkgNode, "deprecated", scalarNode(pkg.Node.Deprecated, 0))
 		}
 
-		addMapping(node, key, pkgNode)
+		addMapping(node, displayKey, pkgNode)
 	}
 
 	return node
@@ -227,7 +289,7 @@ func buildSnapshots(result *ResolveResult) *yaml.Node {
 			addMapping(snapNode, "dependencies", depsNode)
 		}
 
-		addMapping(node, key, snapNode)
+		addMapping(node, pnpmPackageKey(pkg), snapNode)
 	}
 
 	return node

@@ -124,6 +124,44 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 			if v := readLocalPackageVersion(s.specDir, strings.TrimPrefix(actualConstraint, "file:")); v != "" {
 				version = v
 			}
+		} else if strings.HasPrefix(actualConstraint, "https://") && strings.HasSuffix(actualConstraint, ".tgz") {
+			// Tarball URL - resolve from registry to get full metadata.
+			if pkgName, ver := parseTarballURL(actualConstraint); pkgName != "" && ver != "" {
+				meta, err := s.registry.FetchMetadata(s.ctx, pkgName, ver)
+				if err == nil {
+					// Fully resolved - create a proper node, not a placeholder.
+					resolvedKey := meta.Name + "@" + meta.Version
+					if existingNode, ok := s.nodes[resolvedKey]; ok {
+						return existingNode, nil
+					}
+					node := &Node{
+						Name:       meta.Name,
+						Version:    meta.Version,
+						Integrity:  meta.Integrity,
+						Shasum:     meta.Shasum,
+						TarballURL: meta.TarballURL,
+						Engines:    meta.Engines,
+					}
+					s.nodes[key] = node
+					s.nodes[resolvedKey] = node
+					s.nodeIndex.Add(meta.Name, node)
+					graph.Nodes[resolvedKey] = node
+					// Resolve transitive deps of the tarball package.
+					for depName, depConstraint := range meta.Dependencies {
+						child, err := s.resolveDep(graph, depName, depConstraint, DepRegular)
+						if err != nil {
+							continue
+						}
+						node.Dependencies = append(node.Dependencies, &Edge{
+							Name: depName, Constraint: depConstraint, Target: child, Type: DepRegular,
+						})
+					}
+					if s.policy.OnNodeResolved != nil {
+						s.policy.OnNodeResolved(resolvedKey, node, meta, node.Dependencies)
+					}
+					return node, nil
+				}
+			}
 		} else if owner, repo, ok := parseGitHubURL(actualConstraint); ok {
 			// GitHub deps - fetch version and commit hash via HTTPS API.
 			if info := resolveGitHubDep(s.ctx, owner, repo); info != nil {
@@ -396,6 +434,28 @@ func resolveGitHubDep(ctx context.Context, owner, repo string) *gitHubDepInfo {
 	}
 
 	return &gitHubDepInfo{Version: pkg.Version, CommitHash: commit.SHA}
+}
+
+// parseTarballURL extracts the package name and version from a npm registry
+// tarball URL like https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz
+func parseTarballURL(url string) (name, version string) {
+	// Extract the filename from the URL.
+	lastSlash := strings.LastIndex(url, "/")
+	if lastSlash == -1 {
+		return "", ""
+	}
+	filename := strings.TrimSuffix(url[lastSlash+1:], ".tgz")
+	// filename is like "is-odd-3.0.1"
+	// Find the last dash that separates name from version.
+	for i := len(filename) - 1; i >= 0; i-- {
+		if filename[i] == '-' {
+			candidate := filename[i+1:]
+			if len(candidate) > 0 && candidate[0] >= '0' && candidate[0] <= '9' {
+				return filename[:i], candidate
+			}
+		}
+	}
+	return "", ""
 }
 
 // readLocalPackageVersion reads the version from a local package.json.
