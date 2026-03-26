@@ -171,10 +171,12 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 
 	// Generate lockfile targeting the Docker runner's platform (linux/x64).
 	ctx := context.Background()
+	fixtureDir := filepath.Join("fixtures", fixture)
 	result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
 		SpecFile:     specData,
 		OutputFormat: vc.Format,
 		Platform:     "linux/x64",
+		SpecDir:      fixtureDir,
 	})
 	if err != nil {
 		t.Fatalf("Generate(%s, %s) failed: %v", vc.Format, fixture, err)

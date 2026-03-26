@@ -85,7 +85,7 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		return nil, fmt.Errorf("parsing package.json: %w", err)
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
 	result, err := resolver.ResolveWithPlacement(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
@@ -160,7 +160,7 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		return nil, fmt.Errorf("parsing package.json: %w", err)
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
 	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
@@ -225,7 +225,7 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		return nil, fmt.Errorf("parsing package.json: %w", err)
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
 	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
@@ -267,7 +267,7 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		return nil, fmt.Errorf("parsing package.json: %w", err)
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
 	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)

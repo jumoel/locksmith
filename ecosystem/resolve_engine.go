@@ -2,7 +2,10 @@ package ecosystem
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,6 +44,7 @@ type resolverState struct {
 	resolving   map[string]bool  // cycle detection
 	projectDeps map[string]bool  // root dep names
 	policy      ResolverPolicy
+	specDir     string // for resolving file: deps
 }
 
 // Resolve executes the shared dependency resolution algorithm.
@@ -55,6 +59,7 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 		resolving:   make(map[string]bool),
 		projectDeps: make(map[string]bool),
 		policy:      policy,
+		specDir:     opts.SpecDir,
 	}
 
 	for _, dep := range project.Dependencies {
@@ -109,16 +114,25 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		if node, ok := s.nodes[key]; ok {
 			return node, nil
 		}
+		// For file: deps, try to read the real version from the local package.json.
+		// For other non-registry deps, use a placeholder.
+		version := "0.0.0-local"
+		if strings.HasPrefix(actualConstraint, "file:") && s.specDir != "" {
+			if v := readLocalPackageVersion(s.specDir, strings.TrimPrefix(actualConstraint, "file:")); v != "" {
+				version = v
+			}
+		}
 		node := &Node{
-			Name:    actualName,
-			Version: actualConstraint,
+			Name:       actualName,
+			Version:    version,
+			TarballURL: actualConstraint,
 		}
 		s.nodes[key] = node
 		s.nodeIndex.Add(actualName, node)
 		graph.Nodes[key] = node
 		if s.policy.OnNodeResolved != nil {
 			s.policy.OnNodeResolved(key, node, &VersionMetadata{
-				Name: actualName, Version: actualConstraint,
+				Name: actualName, Version: version,
 			}, nil)
 		}
 		return node, nil
@@ -291,6 +305,23 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 
 // isNonRegistrySpecifier returns true if the constraint is a non-registry
 // dependency type that cannot be resolved from the npm registry.
+// readLocalPackageVersion reads the version from a local package.json.
+// relPath is relative to specDir (e.g., "./local-pkg").
+func readLocalPackageVersion(specDir, relPath string) string {
+	pkgPath := filepath.Join(specDir, relPath, "package.json")
+	data, err := os.ReadFile(pkgPath)
+	if err != nil {
+		return ""
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return ""
+	}
+	return pkg.Version
+}
+
 func isNonRegistrySpecifier(constraint string) bool {
 	nonRegistryPrefixes := []string{
 		"file:", "link:", "portal:",       // local filesystem

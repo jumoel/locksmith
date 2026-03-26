@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -62,6 +63,7 @@ func generateCmd() *cobra.Command {
 				OutputFormat: outputFormat,
 				RegistryURL:  registryURL,
 				Platform:     platform,
+				SpecDir:      filepath.Dir(specPath),
 			}
 			if cutoffStr != "" {
 				t, err := time.Parse(time.RFC3339, cutoffStr)

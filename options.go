@@ -75,4 +75,9 @@ type GenerateOptions struct {
 	// Platform, if set, filters out packages whose OS/CPU restrictions
 	// are incompatible with the target platform. Format: "os/cpu" (e.g., "linux/x64").
 	Platform string
+
+	// SpecDir is the directory containing the spec file on disk. Used to
+	// resolve file: dependencies by reading the local package's version.
+	// If empty, file: deps get a placeholder version.
+	SpecDir string
 }

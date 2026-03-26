@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/internal/orderedjson"
@@ -29,6 +30,14 @@ func (f *PackageLockV2Formatter) FormatFromResult(result *ResolveResult, project
 	packages[""] = buildRootEntry(project)
 	for path, placed := range result.PlacedNodes {
 		packages[path] = buildPackageEntry(placed.Node)
+		// file: deps also need a top-level directory entry with their version.
+		if strings.HasPrefix(placed.Node.TarballURL, "file:") {
+			dirName := strings.TrimPrefix(placed.Node.TarballURL, "file:")
+			dirName = strings.TrimPrefix(dirName, "./")
+			packages[dirName] = orderedjson.Map{
+				{Key: "version", Value: placed.Node.Version},
+			}
+		}
 	}
 
 	// Build the hierarchical dependencies (same as v1).

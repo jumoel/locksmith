@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/internal/maputil"
@@ -39,6 +40,14 @@ func (f *PackageLockV3Formatter) FormatFromResult(result *ResolveResult, project
 	// All placed packages.
 	for path, placed := range result.PlacedNodes {
 		packages[path] = buildPackageEntry(placed.Node)
+		// file: deps also need a top-level directory entry with their version.
+		if strings.HasPrefix(placed.Node.TarballURL, "file:") {
+			dirName := strings.TrimPrefix(placed.Node.TarballURL, "file:")
+			dirName = strings.TrimPrefix(dirName, "./")
+			packages[dirName] = orderedjson.Map{
+				{Key: "version", Value: placed.Node.Version},
+			}
+		}
 	}
 
 	// Top-level lockfile structure with deterministic key order.
@@ -93,6 +102,16 @@ func buildRootEntry(project *ecosystem.ProjectSpec) orderedjson.Map {
 // dependencies, optionalDependencies, peerDependencies, peerDependenciesMeta,
 // bin, engines, os, cpu, funding, deprecated.
 func buildPackageEntry(node *ecosystem.Node) orderedjson.Map {
+	// file: dependencies are symlinks - emit link format instead of regular entry.
+	if strings.HasPrefix(node.TarballURL, "file:") {
+		dirName := strings.TrimPrefix(node.TarballURL, "file:")
+		dirName = strings.TrimPrefix(dirName, "./")
+		return orderedjson.Map{
+			{Key: "resolved", Value: dirName},
+			{Key: "link", Value: true},
+		}
+	}
+
 	entry := orderedjson.Map{
 		{Key: "version", Value: node.Version},
 		{Key: "resolved", Value: node.TarballURL},
