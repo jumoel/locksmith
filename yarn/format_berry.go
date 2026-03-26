@@ -211,6 +211,35 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 						b.WriteString("      optional: true\n")
 					}
 				}
+				// peerDependencies and peerDependenciesMeta from package.json.
+				g := ecosystem.GroupDependenciesByType(project.Dependencies)
+				if len(g.Peer) > 0 {
+					peerNames := make([]string, 0, len(g.Peer))
+					for name := range g.Peer {
+						peerNames = append(peerNames, name)
+					}
+					sort.Strings(peerNames)
+					b.WriteString("  peerDependencies:\n")
+					for _, name := range peerNames {
+						yamlName := name
+						if strings.HasPrefix(name, "@") {
+							yamlName = fmt.Sprintf("%q", name)
+						}
+						b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, g.Peer[name]))
+					}
+					// Mark all peers as optional in peerDependenciesMeta.
+					// TODO: track actual peerDependenciesMeta from package.json
+					// to distinguish required vs optional peers.
+					b.WriteString("  peerDependenciesMeta:\n")
+					for _, name := range peerNames {
+						yamlName := name
+						if strings.HasPrefix(name, "@") {
+							yamlName = fmt.Sprintf("%q", name)
+						}
+						b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
+						b.WriteString("      optional: \"true\"\n")
+					}
+				}
 				b.WriteString("  languageName: unknown\n")
 				b.WriteString("  linkType: soft\n")
 			},
