@@ -137,33 +137,28 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 		}
 
 		// BFS to place nested versions with path keys.
-		type walkItem struct {
-			parentPath string
-			node       *ecosystem.Node
-		}
-		var queue []walkItem
+		var queue []*ecosystem.Node
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
-				queue = append(queue, walkItem{parentPath: edge.Target.Name, node: edge.Target})
+				queue = append(queue, edge.Target)
 			}
 		}
 		seen := make(map[string]bool)
 		for len(queue) > 0 {
-			item := queue[0]
+			current := queue[0]
 			queue = queue[1:]
 
-			nodeKey := item.node.Name + "@" + item.node.Version
+			nodeKey := current.Name + "@" + current.Version
 			if seen[nodeKey] {
 				continue
 			}
 			seen[nodeKey] = true
 
-			for _, edge := range item.node.Dependencies {
+			for _, edge := range current.Dependencies {
 				if edge.Target == nil {
 					continue
 				}
 				childKey := edge.Target.Name + "@" + edge.Target.Version
-				childPath := item.parentPath + "/" + edge.Target.Name
 
 				if !placed[childKey] {
 					if pkg, ok := result.Packages[childKey]; ok {
@@ -174,13 +169,17 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 							entries = append(entries, keyedPkg{key: edge.Target.Name, pkg: pkg})
 							barePlaced[edge.Target.Name] = true
 						} else {
-							entries = append(entries, keyedPkg{key: childPath, pkg: pkg})
+							// Bun uses "immediate-parent/package" as the key
+							// for non-default versions of multi-version packages,
+							// NOT the full path from root.
+							pathKey := current.Name + "/" + edge.Target.Name
+							entries = append(entries, keyedPkg{key: pathKey, pkg: pkg})
 						}
 						placed[childKey] = true
 					}
 				}
 
-				queue = append(queue, walkItem{parentPath: childPath, node: edge.Target})
+				queue = append(queue, edge.Target)
 			}
 		}
 	}
@@ -204,8 +203,10 @@ func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 	node := pkg.Node
 	resolvedSpec := fmt.Sprintf("%s@%s", node.Name, node.Version)
 
-	// metadata object - contains dependencies if any
-	var metadata orderedjson.Map
+	// metadata object - bun includes dependencies, optionalDependencies,
+	// peerDependencies, and bin when present.
+	metadata := orderedjson.Map{}
+
 	if len(pkg.Dependencies) > 0 {
 		depNames := make([]string, 0, len(pkg.Dependencies))
 		for name := range pkg.Dependencies {
@@ -216,14 +217,27 @@ func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 		depsMap := make(orderedjson.Map, len(depNames))
 		for i, name := range depNames {
 			dep := pkg.Dependencies[name]
-			// Always use the original constraint for dependency values.
 			depsMap[i] = orderedjson.Entry{Key: name, Value: dep.Constraint}
 		}
-		metadata = orderedjson.Map{
-			{Key: "dependencies", Value: depsMap},
-		}
-	} else {
-		metadata = orderedjson.Map{}
+		metadata = append(metadata, orderedjson.Entry{Key: "dependencies", Value: depsMap})
+	}
+
+	if len(pkg.OptionalDeps) > 0 {
+		metadata = append(metadata, orderedjson.Entry{
+			Key: "optionalDependencies", Value: orderedjson.FromStringMap(pkg.OptionalDeps),
+		})
+	}
+
+	if len(pkg.PeerDeps) > 0 {
+		metadata = append(metadata, orderedjson.Entry{
+			Key: "peerDependencies", Value: orderedjson.FromStringMap(pkg.PeerDeps),
+		})
+	}
+
+	if len(pkg.Bin) > 0 {
+		metadata = append(metadata, orderedjson.Entry{
+			Key: "bin", Value: orderedjson.FromStringMap(pkg.Bin),
+		})
 	}
 
 	return []interface{}{

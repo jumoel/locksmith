@@ -25,8 +25,12 @@ type ResolveResult struct {
 
 // ResolvedPackage holds bun-specific resolution info for a package.
 type ResolvedPackage struct {
-	Node         *ecosystem.Node
-	Dependencies map[string]DepInfo // name -> dep info
+	Node             *ecosystem.Node
+	Dependencies     map[string]DepInfo // name -> dep info
+	PeerDeps         map[string]string  // name -> constraint (from registry metadata)
+	OptionalDeps     map[string]string  // name -> constraint (from registry metadata)
+	Bin              map[string]string  // bin entries from registry metadata
+	HasInstallScript bool
 }
 
 // DepInfo holds both the constraint and the resolved version for a dependency.
@@ -76,7 +80,18 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 				}
 			}
 		}
-		packages[key] = &ResolvedPackage{Node: node, Dependencies: deps}
+		pkg := &ResolvedPackage{Node: node, Dependencies: deps}
+		if len(meta.PeerDeps) > 0 {
+			pkg.PeerDeps = meta.PeerDeps
+		}
+		if len(meta.OptionalDeps) > 0 {
+			pkg.OptionalDeps = meta.OptionalDeps
+		}
+		if len(meta.Bin) > 0 {
+			pkg.Bin = meta.Bin
+		}
+		pkg.HasInstallScript = meta.HasInstallScript
+		packages[key] = pkg
 	}
 
 	graph, err := ecosystem.Resolve(ctx, project, registry, opts, policy)

@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "dependencies": {
     "ms": "^2.1.0",
-    "local-pkg": "file:./local-pkg",
-    "git-pkg": "github:sindresorhus/is-odd"
+    "git-pkg": "git+https://github.com/sindresorhus/is-odd.git"
   }
 }
