@@ -516,14 +516,16 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 
 	devFlags := computeDevFlags(result, project)
 
-	// Build lookup from dep name to resolved version and target name via root edges.
+	// Build lookup from dep name to resolved version, target name, and tarball URL via root edges.
 	rootVersions := make(map[string]string)
-	rootTargetNames := make(map[string]string) // edge name -> target real name (for aliases)
+	rootTargetNames := make(map[string]string)
+	rootTarballURLsV5 := make(map[string]string)
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
 				rootVersions[edge.Name] = edge.Target.Version
 				rootTargetNames[edge.Name] = edge.Target.Name
+				rootTarballURLsV5[edge.Name] = edge.Target.TarballURL
 			}
 		}
 	}
@@ -555,11 +557,21 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	addMapping(root, "specifiers", specNode)
 
 	// v5DepValue returns the dependency value for the v5 format.
-	// For aliases (dep name != target name), use the /target-name/version path.
-	// For regular deps, use just the version.
 	v5DepValue := func(depName string) string {
 		version := rootVersions[depName]
 		targetName := rootTargetNames[depName]
+		url := rootTarballURLsV5[depName]
+		// file: deps are links in v5 format.
+		if strings.HasPrefix(url, "file:") {
+			path := strings.TrimPrefix(url, "file:")
+			path = strings.TrimPrefix(path, "./")
+			return "link:" + path
+		}
+		// Git deps use the URL-based package key format.
+		if strings.HasPrefix(url, "git+") {
+			return "/" + targetName + "@" + url
+		}
+		// Aliases (dep name != target name): use the /target-name/version path.
 		if targetName != "" && targetName != depName {
 			return buildV5PackageKey(targetName, version)
 		}
@@ -608,8 +620,12 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	for _, key := range keys {
 		pkg := result.Packages[key]
 		url := pkg.Node.TarballURL
+		// file: deps are links in v5, skip them from packages section.
+		if strings.HasPrefix(url, "file:") {
+			continue
+		}
 		var v5Key string
-		if strings.HasPrefix(url, "git+") || strings.HasPrefix(url, "file:") {
+		if strings.HasPrefix(url, "git+") {
 			// Non-registry deps use pnpmPackageKey format with / prefix
 			v5Key = "/" + pnpmPackageKey(pkg)
 		} else {
@@ -733,11 +749,13 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 
 	rootVersions := make(map[string]string)
 	rootTargetNamesV4 := make(map[string]string)
+	rootTarballURLsV4 := make(map[string]string)
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
 				rootVersions[edge.Name] = edge.Target.Version
 				rootTargetNamesV4[edge.Name] = edge.Target.Name
+				rootTarballURLsV4[edge.Name] = edge.Target.TarballURL
 			}
 		}
 	}
@@ -762,10 +780,18 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 	addMapping(root, "specifiers", specNode)
 
-	// v4DepValue returns the v4/v5.1 dep value, using path format for aliases.
 	v4DepValue := func(depName string) string {
 		version := rootVersions[depName]
 		targetName := rootTargetNamesV4[depName]
+		url := rootTarballURLsV4[depName]
+		if strings.HasPrefix(url, "file:") {
+			path := strings.TrimPrefix(url, "file:")
+			path = strings.TrimPrefix(path, "./")
+			return "link:" + path
+		}
+		if strings.HasPrefix(url, "git+") {
+			return "/" + targetName + "@" + url
+		}
 		if targetName != "" && targetName != depName {
 			return buildV5PackageKey(targetName, version)
 		}
@@ -804,7 +830,16 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	packagesNode := &yaml.Node{Kind: yaml.MappingNode}
 	for _, key := range maputil.SortedMapKeys(result.Packages) {
 		pkg := result.Packages[key]
-		v5Key := buildV5PackageKey(pkg.Node.Name, pkg.Node.Version)
+		url := pkg.Node.TarballURL
+		if strings.HasPrefix(url, "file:") {
+			continue
+		}
+		var v5Key string
+		if strings.HasPrefix(url, "git+") {
+			v5Key = "/" + pnpmPackageKey(pkg)
+		} else {
+			v5Key = buildV5PackageKey(pkg.Node.Name, pkg.Node.Version)
+		}
 		pkgNode := buildInlinePackageNode(pkg, devFlags[key])
 		addMapping(packagesNode, v5Key, pkgNode)
 	}
