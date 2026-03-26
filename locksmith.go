@@ -290,6 +290,29 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		}
 	}
 
+	// Remove packages only reachable via peer dep edges from root.
+	// Bun doesn't auto-install optional peers.
+	if result.Graph != nil && result.Graph.Root != nil {
+		peerOnlyKeys := make(map[string]bool)
+		nonPeerKeys := make(map[string]bool)
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target == nil {
+				continue
+			}
+			key := edge.Target.Name + "@" + edge.Target.Version
+			if edge.Type == ecosystem.DepPeer {
+				peerOnlyKeys[key] = true
+			} else {
+				nonPeerKeys[key] = true
+			}
+		}
+		for key := range peerOnlyKeys {
+			if !nonPeerKeys[key] {
+				delete(result.Packages, key)
+			}
+		}
+	}
+
 	lockfile, err := formatter.FormatFromResult(result, spec)
 	if err != nil {
 		return nil, fmt.Errorf("formatting lockfile: %w", err)

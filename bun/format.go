@@ -109,6 +109,8 @@ func buildWorkspaceDeps(project *ecosystem.ProjectSpec, result *ResolveResult, m
 	if len(g.Optional) > 0 {
 		entry = append(entry, orderedjson.Entry{Key: "optionalDependencies", Value: resolveDepMap(g.Optional)})
 	}
+	// Peer deps are not included in workspace deps - bun doesn't auto-install
+	// optional peers and handles peer resolution internally.
 
 	return entry
 }

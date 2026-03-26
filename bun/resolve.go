@@ -64,6 +64,11 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 		deps := make(map[string]DepInfo)
 		for _, e := range edges {
 			if e.Target != nil {
+				// Skip peer dep edges - bun doesn't auto-install optional
+				// peers and handles peer resolution internally.
+				if e.Type == ecosystem.DepPeer {
+					continue
+				}
 				deps[e.Target.Name] = DepInfo{
 					Constraint:      e.Constraint,
 					ResolvedName:    e.Target.Name,
