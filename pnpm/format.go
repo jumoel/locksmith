@@ -81,7 +81,8 @@ func (f *PnpmLockV9Formatter) FormatFromResult(result *ResolveResult, project *e
 }
 
 // buildImporter constructs the importer entry for the root project (".").
-func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult) *yaml.Node {
+func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult, v6KeyFormat ...bool) *yaml.Node {
+	useV6 := len(v6KeyFormat) > 0 && v6KeyFormat[0]
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
 	g := ecosystem.GroupDependenciesByType(project.Dependencies)
@@ -100,15 +101,15 @@ func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult) *yaml.
 	}
 
 	if len(regular) > 0 {
-		depsNode := buildImporterDeps(regular, result, false)
+		depsNode := buildImporterDeps(regular, result, false, useV6)
 		addMapping(node, "dependencies", depsNode)
 	}
 	if len(g.Dev) > 0 {
-		devNode := buildImporterDeps(g.Dev, result, false)
+		devNode := buildImporterDeps(g.Dev, result, false, useV6)
 		addMapping(node, "devDependencies", devNode)
 	}
 	if len(g.Optional) > 0 {
-		optNode := buildImporterDeps(g.Optional, result, true)
+		optNode := buildImporterDeps(g.Optional, result, true, useV6)
 		if len(optNode.Content) > 0 {
 			addMapping(node, "optionalDependencies", optNode)
 		}
@@ -120,17 +121,18 @@ func buildImporter(project *ecosystem.ProjectSpec, result *ResolveResult) *yaml.
 // buildImporterDeps constructs a dependency group within an importer entry.
 // The deps map is name -> constraint (specifier from package.json).
 // If skipUnresolved is true, deps with no resolved version are omitted.
-func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnresolved bool) *yaml.Node {
+func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnresolved bool, v6KeyFormat ...bool) *yaml.Node {
+	useV6Key := len(v6KeyFormat) > 0 && v6KeyFormat[0]
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
-	// Build a lookup from dep name to the resolved version via root edges.
-	// This is necessary when multiple versions of the same package exist
-	// (e.g., is-odd@3.0.1 as root dep and is-odd@0.1.2 as transitive dep).
+	// Build lookups from dep name to resolved version and target name via root edges.
 	rootVersions := make(map[string]string)
+	rootTargetNames := make(map[string]string)
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
 				rootVersions[edge.Name] = edge.Target.Version
+				rootTargetNames[edge.Name] = edge.Target.Name
 			}
 		}
 	}
@@ -144,9 +146,21 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 		}
 		constraint := deps[name]
 
+		// For aliases (dep name != target name), use targetName@version format.
+		// v6 uses /targetName@version (with leading /).
+		versionValue := resolvedVersion
+		targetName := rootTargetNames[name]
+		if targetName != "" && targetName != name {
+			if useV6Key {
+				versionValue = "/" + targetName + "@" + resolvedVersion
+			} else {
+				versionValue = targetName + "@" + resolvedVersion
+			}
+		}
+
 		depNode := &yaml.Node{Kind: yaml.MappingNode}
 		addMapping(depNode, "specifier", specifierNode(constraint))
-		addMapping(depNode, "version", scalarNode(resolvedVersion, 0))
+		addMapping(depNode, "version", scalarNode(versionValue, 0))
 		addMapping(node, name, depNode)
 	}
 
@@ -531,9 +545,9 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 	addMapping(settings, "excludeLinksFromLockfile", scalarNode("false", 0))
 	addMapping(root, "settings", settings)
 
-	// importers (reuse the v9 importer builder)
+	// importers (reuse the v9 importer builder, with v6 key format for aliases)
 	importers := &yaml.Node{Kind: yaml.MappingNode}
-	importerDot := buildImporter(project, result)
+	importerDot := buildImporter(project, result, true)
 	addMapping(importers, ".", importerDot)
 	addMapping(root, "importers", importers)
 
