@@ -112,8 +112,9 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 	}
 
 	// For multi-version packages, walk from root to find dependency paths.
-	// The version that the root depends on gets the bare name.
+	// The first version encountered gets the bare name key.
 	// Other versions get path keys based on their parent chain.
+	barePlaced := make(map[string]bool) // tracks which names have bare key
 	if result.Graph != nil && result.Graph.Root != nil {
 		// First, place root-level versions with bare name keys.
 		for _, edge := range result.Graph.Root.Dependencies {
@@ -131,6 +132,7 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 			if pkg, ok := result.Packages[key]; ok {
 				entries = append(entries, keyedPkg{key: name, pkg: pkg})
 				placed[key] = true
+				barePlaced[name] = true
 			}
 		}
 
@@ -165,7 +167,15 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 
 				if !placed[childKey] {
 					if pkg, ok := result.Packages[childKey]; ok {
-						entries = append(entries, keyedPkg{key: childPath, pkg: pkg})
+						// First version of a multi-version package gets bare name.
+						// Check if any version of this name already has the bare key.
+						useBare := len(byName[edge.Target.Name]) > 1 && !barePlaced[edge.Target.Name]
+						if useBare {
+							entries = append(entries, keyedPkg{key: edge.Target.Name, pkg: pkg})
+							barePlaced[edge.Target.Name] = true
+						} else {
+							entries = append(entries, keyedPkg{key: childPath, pkg: pkg})
+						}
 						placed[childKey] = true
 					}
 				}
