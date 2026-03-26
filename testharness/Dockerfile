@@ -52,11 +52,12 @@ RUN npm install -g pnpm@4 --prefix /opt/pnpm4
 # pnpm@6 crashes on Node 22 - use @pnpm/exe which bundles its own Node.
 RUN npm install -g @pnpm/exe@6 --prefix /opt/pnpm6
 
-# Install bun.
+# Install bun and git.
 RUN apt-get update && apt-get install -y curl unzip git && \
     curl -fsSL https://bun.sh/install | bash && \
     ln -s /root/.bun/bin/bun /usr/local/bin/bun && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
 
 # Helper scripts for version-switching.
 COPY run-npm.sh /usr/local/bin/run-npm
