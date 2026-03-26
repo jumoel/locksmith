@@ -132,7 +132,7 @@ func TestIntegration(t *testing.T) {
 					if fixture == "aliased-dep" && vc.PMName == "npm" && vc.PMVersion == "6" {
 						t.Skip("npm 6 crashes on npm: alias syntax (fetchSpec undefined)")
 					}
-					t.Parallel()
+						t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion
 					t.Run(pmTag, func(t *testing.T) {
 						runVerification(t, vc, fixture)

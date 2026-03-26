@@ -65,8 +65,8 @@ RUN mkdir -p /root/.ssh && \
 
 # npm converts GitHub git URLs to SSH. Rewrite SSH to HTTPS so public
 # repos can be cloned anonymously without SSH keys.
-RUN git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" && \
-    git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"
+RUN git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/" && \
+    git config --global --add url."https://github.com/".insteadOf "git@github.com:"
 ENV GIT_TERMINAL_PROMPT=0
 
 

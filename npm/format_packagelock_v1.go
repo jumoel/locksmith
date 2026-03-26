@@ -68,7 +68,7 @@ func buildV1Dependencies(parent *PlacedNode) orderedjson.Map {
 	deps := make(orderedjson.Map, 0, len(names))
 	for _, name := range names {
 		child := parent.Children[name]
-		entry := buildV1DepEntry(child)
+		entry := buildV1DepEntry(child, name)
 		deps = append(deps, orderedjson.Entry{Key: name, Value: entry})
 	}
 
@@ -76,8 +76,29 @@ func buildV1Dependencies(parent *PlacedNode) orderedjson.Map {
 }
 
 // buildV1DepEntry constructs a single dependency entry in the v1 format.
-func buildV1DepEntry(placed *PlacedNode) orderedjson.Map {
+func buildV1DepEntry(placed *PlacedNode, depName string) orderedjson.Map {
 	node := placed.Node
+
+	// Tarball URL aliases: when the dep name differs from the node's real name,
+	// it was resolved from a tarball URL or other alias. Use the TarballURL as version.
+	if depName != node.Name && !strings.HasPrefix(node.TarballURL, "file:") && !strings.HasPrefix(node.TarballURL, "git+") {
+		entry := orderedjson.Map{
+			{Key: "version", Value: node.TarballURL},
+			{Key: "integrity", Value: node.Integrity},
+		}
+		if len(node.Dependencies) > 0 {
+			requires := make(map[string]string)
+			for _, edge := range node.Dependencies {
+				requires[edge.Name] = edge.Constraint
+			}
+			entry = append(entry, orderedjson.Entry{Key: "requires", Value: orderedjson.FromStringMap(requires)})
+		}
+		nestedDeps := buildV1Dependencies(placed)
+		if nestedDeps != nil {
+			entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: nestedDeps})
+		}
+		return entry
+	}
 
 	// Non-registry deps (file:, git) use the specifier as version in v1 format.
 	if strings.HasPrefix(node.TarballURL, "file:") {

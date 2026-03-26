@@ -58,6 +58,11 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 	// "name@constraint" because the resolver uses the constraint as the key suffix.
 	classicEdgeKey := func(edge *ecosystem.Edge) string {
 		if isNonRegistryConstraint(edge.Constraint) {
+			// For tarball URL deps that were fully resolved, the Packages map
+			// uses the resolved name@version key, not the constraint URL.
+			if strings.HasPrefix(edge.Constraint, "https://") && edge.Target.Version != "0.0.0-local" {
+				return edge.Target.Name + "@" + edge.Target.Version
+			}
 			return edge.Target.Name + "@" + edge.Constraint
 		}
 		return edge.Target.Name + "@" + edge.Target.Version
@@ -178,8 +183,10 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 		// resolved
 		fmt.Fprintf(&buf, "  resolved %q\n", entry.resolvedURL)
 
-		// integrity
-		fmt.Fprintf(&buf, "  integrity %s\n", entry.integrity)
+		// integrity (omit for deps without integrity hash, e.g., git deps)
+		if entry.integrity != "" {
+			fmt.Fprintf(&buf, "  integrity %s\n", entry.integrity)
+		}
 
 		// dependencies
 		if len(entry.dependencies) > 0 {
