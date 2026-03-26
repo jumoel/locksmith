@@ -211,7 +211,7 @@ func formatConstraintKey(name, constraint string) string {
 // maintaining a fragile allow-list, we quote any key that contains @, spaces,
 // pipes, or other non-trivial characters.
 func quoteConstraintKey(key string) string {
-	if strings.HasPrefix(key, "@") || strings.ContainsAny(key, " |><=!") {
+	if strings.HasPrefix(key, "@") || strings.ContainsAny(key, " |><=!:") {
 		return fmt.Sprintf("%q", key)
 	}
 	return key
