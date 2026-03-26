@@ -75,3 +75,68 @@ func TestBerryRootDepsQuoting(t *testing.T) {
 		t.Errorf("v8 wrappy constraint should be \"npm:*\", got:\n%s", output8)
 	}
 }
+
+// TestBerryConstraintDedup verifies that constraint deduplication only
+// happens for v8 (yarn 4), not v6 (yarn 3).
+func TestBerryConstraintDedup(t *testing.T) {
+	// Create a package with two constraints that resolve to the same version.
+	node := &ecosystem.Node{Name: "tslib", Version: "2.8.1", Integrity: "sha512-fake"}
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{Name: "tslib", Constraint: "^2.4.0", Target: node, Type: ecosystem.DepRegular},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{"tslib@2.8.1": node},
+	}
+	// A second package also depends on tslib with a different constraint.
+	otherNode := &ecosystem.Node{
+		Name: "other", Version: "1.0.0", Integrity: "sha512-other",
+		Dependencies: []*ecosystem.Edge{
+			{Name: "tslib", Constraint: "^2.8.0", Target: node, Type: ecosystem.DepRegular},
+		},
+	}
+	graph.Nodes["other@1.0.0"] = otherNode
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"tslib@2.8.1": {Node: node, Dependencies: map[string]string{}},
+			"other@1.0.0": {Node: otherNode, Dependencies: map[string]string{"tslib": "2.8.1"}},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name: "test", Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "tslib", Constraint: "^2.4.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	// v6 (yarn 3) should keep BOTH constraints.
+	f6 := NewYarnBerryV6Formatter()
+	data6, err := f6.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("v6 format failed: %v", err)
+	}
+	out6 := string(data6)
+	if !strings.Contains(out6, "tslib@npm:^2.4.0") || !strings.Contains(out6, "tslib@npm:^2.8.0") {
+		t.Errorf("v6 should keep both constraints, got:\n%s", out6)
+	}
+
+	// v8 (yarn 4) should deduplicate to only ^2.8.0.
+	f8 := NewYarnBerryV8Formatter()
+	data8, err := f8.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("v8 format failed: %v", err)
+	}
+	out8 := string(data8)
+	if strings.Contains(out8, "tslib@npm:^2.4.0") {
+		t.Errorf("v8 should deduplicate ^2.4.0 when ^2.8.0 exists, got:\n%s", out8)
+	}
+	if !strings.Contains(out8, "tslib@npm:^2.8.0") {
+		t.Errorf("v8 should keep ^2.8.0, got:\n%s", out8)
+	}
+}

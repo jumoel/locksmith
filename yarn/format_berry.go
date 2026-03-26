@@ -104,7 +104,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	// Build entries: group constraints by resolved "name@version".
 	// In a flat resolution, each constraint on a given package name resolves to
 	// the same version, so we collect all constraints that point to each package.
-	constraintsByKey := buildConstraintMap(result, project)
+	constraintsByKey := buildConstraintMap(result, project, cfg.RootDepsNpmPrefix)
 
 	// Build sorted entries. Skip packages with no constraints (e.g., filtered
 	// out by platform but still in the Packages map).
@@ -274,7 +274,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 
 // buildConstraintMap collects all "name@npm:constraint" strings that resolve
 // to each "name@version" key in the result.
-func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) map[string][]string {
+func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec, dedup bool) map[string][]string {
 	m := make(map[string][]string)
 
 	// Constraints from the root project's declared dependencies.
@@ -325,12 +325,12 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 		}
 	}
 
-	// Deduplicate constraints: when multiple caret ranges for the same package
-	// resolve to the same version, keep only the most specific (highest lower bound).
-	// e.g., ^2.4.0 is subsumed by ^2.8.0 since both resolve to the same version.
-	for key, constraints := range m {
-		if len(constraints) > 1 {
-			m[key] = deduplicateConstraints(constraints)
+	// Only yarn v8 (yarn 4) deduplicates constraints. v6 (yarn 3) keeps all.
+	if dedup {
+		for key, constraints := range m {
+			if len(constraints) > 1 {
+				m[key] = deduplicateConstraints(constraints)
+			}
 		}
 	}
 
