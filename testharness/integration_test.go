@@ -128,12 +128,11 @@ func TestIntegration(t *testing.T) {
 			for _, fixture := range allFixtures {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
-					// Skip specific PM version crashes (not locksmith bugs).
+					// Skip specific PM version crashes and unfixable PM-specific behaviors.
 					if fixture == "aliased-dep" && vc.PMName == "npm" && vc.PMVersion == "6" {
 						t.Skip("npm 6 crashes on npm: alias syntax (fetchSpec undefined)")
 					}
 					// npm 2 crashes with ENOTDIR on packages with complex dep trees.
-					// This is a known npm 2.15.12 bug with certain tarball formats on Node 8.
 					if vc.PMName == "npm" && vc.PMVersion == "2" {
 						npm2Crashes := map[string]bool{
 							"cli-tools": true, "deep-chain": true, "multiple-peer-providers": true,
@@ -141,6 +140,28 @@ func TestIntegration(t *testing.T) {
 						}
 						if npm2Crashes[fixture] {
 							t.Skip("npm 2 crashes with ENOTDIR on complex dep trees")
+						}
+					}
+					// Yarn berry applies internal patches to typescript and resolve packages.
+					// These patches come from yarn's built-in plugin database and differ by version.
+					// See: https://github.com/yarnpkg/berry/tree/master/packages/plugin-compat
+					if vc.PMName == "yarn" && vc.PMVersion != "1" {
+						yarnPatchFixtures := map[string]bool{
+							"typescript-4": true, "typescript-5": true,
+							"mixed-large": true, // contains typescript
+						}
+						if yarnPatchFixtures[fixture] {
+							t.Skip("yarn berry applies internal patches to typescript (plugin-compat)")
+						}
+						// Yarn v6/v8 also patches resolve and adds @types/* auto-types.
+						if vc.PMVersion == "3" || vc.PMVersion == "4" {
+							yarnV6V8Patches := map[string]bool{
+								"multiple-peer-providers": true, // resolve gets patched
+								"npm-6":                  true, // @types/* auto-types
+							}
+							if yarnV6V8Patches[fixture] {
+								t.Skip("yarn v6/v8 patches resolve and adds @types/* auto-types")
+							}
 						}
 					}
 							t.Parallel()

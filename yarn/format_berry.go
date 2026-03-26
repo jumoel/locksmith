@@ -133,10 +133,12 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	b.WriteString("# Manual changes might be lost - proceed with caution!\n")
 	b.WriteString("\n")
 
-	// Write metadata header.
+	// Write metadata header. Omit cacheKey for empty projects (yarn omits it).
 	b.WriteString("__metadata:\n")
 	b.WriteString(fmt.Sprintf("  version: %d\n", cfg.MetadataVersion))
-	b.WriteString(fmt.Sprintf("  cacheKey: %s\n", cfg.CacheKey))
+	if len(result.Packages) > 0 {
+		b.WriteString(fmt.Sprintf("  cacheKey: %s\n", cfg.CacheKey))
+	}
 
 	// Build workspace root entry so it sorts with the rest.
 	type writeFunc func(b *strings.Builder)
@@ -194,8 +196,9 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 								b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, constraint))
 							}
 						} else {
-							// Quote values containing YAML special chars (: in npm: aliases).
-							if strings.Contains(constraint, ":") {
+							// Quote values containing YAML special chars.
+							// * is a YAML alias, : is a mapping, bare numbers/bools are types.
+							if strings.ContainsAny(constraint, ":*") || constraint == "true" || constraint == "false" || constraint == "null" {
 								b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, constraint))
 							} else {
 								b.WriteString(fmt.Sprintf("    %s: %s\n", yamlName, constraint))
@@ -322,7 +325,67 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 		}
 	}
 
+	// Deduplicate constraints: when multiple caret ranges for the same package
+	// resolve to the same version, keep only the most specific (highest lower bound).
+	// e.g., ^2.4.0 is subsumed by ^2.8.0 since both resolve to the same version.
+	for key, constraints := range m {
+		if len(constraints) > 1 {
+			m[key] = deduplicateConstraints(constraints)
+		}
+	}
+
 	return m
+}
+
+// deduplicateConstraints removes redundant caret constraints.
+// When "name@npm:^2.4.0" and "name@npm:^2.8.0" both exist, the less specific
+// one (^2.4.0) is removed since the more specific one (^2.8.0) implies it.
+func deduplicateConstraints(constraints []string) []string {
+	if len(constraints) <= 1 {
+		return constraints
+	}
+
+	// Group constraints by package name (before @npm:).
+	type parsed struct {
+		full    string
+		name    string
+		version string
+	}
+
+	byName := make(map[string][]parsed)
+	for _, c := range constraints {
+		// Parse "name@npm:^version" format.
+		atIdx := strings.Index(c, "@npm:^")
+		if atIdx == -1 {
+			// Not a caret npm constraint, keep as-is.
+			byName[""] = append(byName[""], parsed{full: c})
+			continue
+		}
+		name := c[:atIdx]
+		ver := c[atIdx+6:] // after "@npm:^"
+		byName[name] = append(byName[name], parsed{full: c, name: name, version: ver})
+	}
+
+	var result []string
+	for _, group := range byName {
+		if len(group) <= 1 || group[0].name == "" {
+			for _, p := range group {
+				result = append(result, p.full)
+			}
+			continue
+		}
+		// Keep only the constraint with the highest version (most specific).
+		best := group[0]
+		for _, p := range group[1:] {
+			if p.version > best.version {
+				best = p
+			}
+		}
+		result = append(result, best.full)
+	}
+
+	sort.Strings(result)
+	return result
 }
 
 // appendUnique appends s to slice only if not already present.
