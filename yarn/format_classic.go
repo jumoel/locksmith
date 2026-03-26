@@ -63,7 +63,10 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 			if strings.HasPrefix(edge.Constraint, "https://") && edge.Target.Version != "0.0.0-local" {
 				return edge.Target.Name + "@" + edge.Target.Version
 			}
-			return edge.Target.Name + "@" + edge.Constraint
+			// Non-registry deps: the Packages map key uses the original dep name
+			// (not target name) because the resolver stores them under
+			// actualName@constraint BEFORE updating actualName from GitHub API.
+			return edge.Name + "@" + edge.Constraint
 		}
 		return edge.Target.Name + "@" + edge.Target.Version
 	}

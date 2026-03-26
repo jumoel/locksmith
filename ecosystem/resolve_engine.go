@@ -163,13 +163,40 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 				}
 			}
 		} else if owner, repo, ok := parseGitHubURL(actualConstraint); ok {
-			// GitHub deps - fetch version, name, and commit hash via HTTPS API.
+			// GitHub deps - fetch version, name, commit hash, and deps via HTTPS API.
 			if info := resolveGitHubDep(s.ctx, owner, repo); info != nil {
 				version = info.Version
 				if info.Name != "" {
 					actualName = info.Name
 				}
 				resolvedURL = fmt.Sprintf("git+ssh://git@github.com/%s/%s.git#%s", owner, repo, info.CommitHash)
+
+				// Create node and resolve transitive deps.
+				node := &Node{
+					Name:       actualName,
+					Version:    version,
+					TarballURL: resolvedURL,
+				}
+				s.nodes[key] = node
+				s.nodeIndex.Add(actualName, node)
+				graph.Nodes[key] = node
+
+				// Resolve transitive deps from the GitHub package.json.
+				for depName, depConstraint := range info.Dependencies {
+					child, err := s.resolveDep(graph, depName, depConstraint, DepRegular)
+					if err != nil {
+						continue
+					}
+					node.Dependencies = append(node.Dependencies, &Edge{
+						Name: depName, Constraint: depConstraint, Target: child, Type: DepRegular,
+					})
+				}
+				if s.policy.OnNodeResolved != nil {
+					s.policy.OnNodeResolved(key, node, &VersionMetadata{
+						Name: actualName, Version: version,
+					}, node.Dependencies)
+				}
+				return node, nil
 			}
 		}
 
@@ -358,9 +385,10 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 // dependency type that cannot be resolved from the npm registry.
 // gitHubDepInfo holds resolved metadata for a GitHub dependency.
 type gitHubDepInfo struct {
-	Name       string
-	Version    string
-	CommitHash string
+	Name         string
+	Version      string
+	CommitHash   string
+	Dependencies map[string]string
 }
 
 // parseGitHubURL extracts owner/repo from GitHub dependency specifiers.
@@ -408,8 +436,9 @@ func resolveGitHubDep(ctx context.Context, owner, repo string) *gitHubDepInfo {
 	defer resp.Body.Close()
 
 	var pkg struct {
-		Name    string `json:"name"`
-		Version string `json:"version"`
+		Name         string            `json:"name"`
+		Version      string            `json:"version"`
+		Dependencies map[string]string `json:"dependencies"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&pkg); err != nil {
 		return nil
@@ -427,7 +456,7 @@ func resolveGitHubDep(ctx context.Context, owner, repo string) *gitHubDepInfo {
 			resp2.Body.Close()
 		}
 		// Return with version but no hash.
-		return &gitHubDepInfo{Name: pkg.Name, Version: pkg.Version}
+		return &gitHubDepInfo{Name: pkg.Name, Version: pkg.Version, Dependencies: pkg.Dependencies}
 	}
 	defer resp2.Body.Close()
 
@@ -435,10 +464,10 @@ func resolveGitHubDep(ctx context.Context, owner, repo string) *gitHubDepInfo {
 		SHA string `json:"sha"`
 	}
 	if err := json.NewDecoder(resp2.Body).Decode(&commit); err != nil {
-		return &gitHubDepInfo{Name: pkg.Name, Version: pkg.Version}
+		return &gitHubDepInfo{Name: pkg.Name, Version: pkg.Version, Dependencies: pkg.Dependencies}
 	}
 
-	return &gitHubDepInfo{Name: pkg.Name, Version: pkg.Version, CommitHash: commit.SHA}
+	return &gitHubDepInfo{Name: pkg.Name, Version: pkg.Version, CommitHash: commit.SHA, Dependencies: pkg.Dependencies}
 }
 
 // parseTarballURL extracts the package name and version from a npm registry
