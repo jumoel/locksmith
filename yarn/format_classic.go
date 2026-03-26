@@ -53,13 +53,14 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 	// Collect all edges from every node (including root).
 	versionConstraints := make(map[string][]constraintInfo) // "name@version" -> constraints
 
-	// Walk root edges.
+	// Walk root edges. Use target name (not edge alias name) as key to
+	// match the Packages map which is keyed by real "name@version".
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target == nil {
 				continue
 			}
-			key := edge.Name + "@" + edge.Target.Version
+			key := edge.Target.Name + "@" + edge.Target.Version
 			versionConstraints[key] = append(versionConstraints[key], constraintInfo{
 				name:       edge.Name,
 				constraint: edge.Constraint,
@@ -76,7 +77,7 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 			if edge.Target == nil {
 				continue
 			}
-			key := edge.Name + "@" + edge.Target.Version
+			key := edge.Target.Name + "@" + edge.Target.Version
 			versionConstraints[key] = append(versionConstraints[key], constraintInfo{
 				name:       edge.Name,
 				constraint: edge.Constraint,
