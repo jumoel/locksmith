@@ -78,7 +78,22 @@ func fieldMatchesPlatform(allowed []string, target string) bool {
 func FilterGraphByPlatform(graph *Graph, plat Platform) map[string]bool {
 	removed := make(map[string]bool)
 
+	// Don't filter root optional deps - PMs require them in the lockfile
+	// specifiers even if platform-incompatible. The PM handles platform
+	// checks at install time.
+	rootOptional := make(map[string]bool)
+	if graph.Root != nil {
+		for _, edge := range graph.Root.Dependencies {
+			if edge.Target != nil && edge.Type == DepOptional {
+				rootOptional[edge.Target.Name+"@"+edge.Target.Version] = true
+			}
+		}
+	}
+
 	for key, node := range graph.Nodes {
+		if rootOptional[key] {
+			continue
+		}
 		if !NodeMatchesPlatform(node, plat) {
 			removed[key] = true
 			delete(graph.Nodes, key)

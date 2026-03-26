@@ -53,14 +53,23 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 	// Collect all edges from every node (including root).
 	versionConstraints := make(map[string][]constraintInfo) // "name@version" -> constraints
 
-	// Walk root edges. Use target name (not edge alias name) as key to
-	// match the Packages map which is keyed by real "name@version".
+	// classicEdgeKey returns the key that matches the Packages map.
+	// For registry deps: "name@version". For non-registry deps (file:, git, etc.):
+	// "name@constraint" because the resolver uses the constraint as the key suffix.
+	classicEdgeKey := func(edge *ecosystem.Edge) string {
+		if isNonRegistryConstraint(edge.Constraint) {
+			return edge.Target.Name + "@" + edge.Constraint
+		}
+		return edge.Target.Name + "@" + edge.Target.Version
+	}
+
+	// Walk root edges.
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target == nil {
 				continue
 			}
-			key := edge.Target.Name + "@" + edge.Target.Version
+			key := classicEdgeKey(edge)
 			versionConstraints[key] = append(versionConstraints[key], constraintInfo{
 				name:       edge.Name,
 				constraint: edge.Constraint,
@@ -77,7 +86,7 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 			if edge.Target == nil {
 				continue
 			}
-			key := edge.Target.Name + "@" + edge.Target.Version
+			key := classicEdgeKey(edge)
 			versionConstraints[key] = append(versionConstraints[key], constraintInfo{
 				name:       edge.Name,
 				constraint: edge.Constraint,
@@ -210,6 +219,17 @@ func formatConstraintKey(name, constraint string) string {
 // characters (e.g., "^3.0.0 || ^4.0.0") must be quoted. Rather than
 // maintaining a fragile allow-list, we quote any key that contains @, spaces,
 // pipes, or other non-trivial characters.
+// isNonRegistryConstraint returns true if the constraint is a non-registry specifier.
+func isNonRegistryConstraint(constraint string) bool {
+	prefixes := []string{"file:", "link:", "git+", "git://", "git@", "github:", "http://", "https://"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(constraint, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func quoteConstraintKey(key string) string {
 	if strings.HasPrefix(key, "@") || strings.ContainsAny(key, " |><=!:") {
 		return fmt.Sprintf("%q", key)

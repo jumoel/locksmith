@@ -5,6 +5,6 @@
     "abbrev": "^1.1.1"
   },
   "optionalDependencies": {
-    "@isaacs/this-does-not-exist-at-all": "*"
+    "@esbuild/aix-ppc64": "0.19.12"
   }
 }
