@@ -166,7 +166,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 			// GitHub deps - fetch version and commit hash via HTTPS API.
 			if info := resolveGitHubDep(s.ctx, owner, repo); info != nil {
 				version = info.Version
-				resolvedURL = fmt.Sprintf("git+ssh://git@github.com/%s/%s.git#%s", owner, repo, info.CommitHash)
+				resolvedURL = fmt.Sprintf("git+https://github.com/%s/%s.git#%s", owner, repo, info.CommitHash)
 			}
 		}
 
