@@ -169,7 +169,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 				if info.Name != "" {
 					actualName = info.Name
 				}
-				resolvedURL = fmt.Sprintf("git+https://github.com/%s/%s.git#%s", owner, repo, info.CommitHash)
+				resolvedURL = fmt.Sprintf("git+ssh://git@github.com/%s/%s.git#%s", owner, repo, info.CommitHash)
 			}
 		}
 
