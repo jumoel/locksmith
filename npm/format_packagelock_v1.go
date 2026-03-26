@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/internal/orderedjson"
@@ -77,6 +78,38 @@ func buildV1Dependencies(parent *PlacedNode) orderedjson.Map {
 // buildV1DepEntry constructs a single dependency entry in the v1 format.
 func buildV1DepEntry(placed *PlacedNode) orderedjson.Map {
 	node := placed.Node
+
+	// Non-registry deps (file:, git) use the specifier as version in v1 format.
+	if strings.HasPrefix(node.TarballURL, "file:") {
+		entry := orderedjson.Map{
+			{Key: "version", Value: node.TarballURL},
+		}
+		nestedDeps := buildV1Dependencies(placed)
+		if nestedDeps != nil {
+			entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: nestedDeps})
+		}
+		return entry
+	}
+	if strings.HasPrefix(node.TarballURL, "git+") || strings.HasPrefix(node.TarballURL, "github:") ||
+		(strings.HasPrefix(node.TarballURL, "https://") && node.Version == "0.0.0-local") {
+		entry := orderedjson.Map{
+			{Key: "version", Value: node.TarballURL},
+			{Key: "from", Value: node.TarballURL},
+		}
+		if len(node.Dependencies) > 0 {
+			requires := make(map[string]string)
+			for _, edge := range node.Dependencies {
+				requires[edge.Name] = edge.Constraint
+			}
+			entry = append(entry, orderedjson.Entry{Key: "requires", Value: orderedjson.FromStringMap(requires)})
+		}
+		nestedDeps := buildV1Dependencies(placed)
+		if nestedDeps != nil {
+			entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: nestedDeps})
+		}
+		return entry
+	}
+
 	entry := orderedjson.Map{
 		{Key: "version", Value: node.Version},
 		{Key: "resolved", Value: node.TarballURL},
