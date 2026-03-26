@@ -287,10 +287,20 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 			if edge.Type == ecosystem.DepPeer {
 				continue
 			}
-			targetKey := edge.Target.Name + "@" + edge.Target.Version
-			// Don't double-prefix constraints already starting with "npm:".
+			// For non-registry deps, use the constraint as part of the key
+			// to match the Packages map (which uses name@constraint for these).
 			constraint := edge.Constraint
+			var targetKey string
+			if isNonRegistryBerryConstraint(constraint) {
+				targetKey = edge.Target.Name + "@" + constraint
+			} else {
+				targetKey = edge.Target.Name + "@" + edge.Target.Version
+			}
+			// Don't add npm: prefix for non-registry constraints.
 			if strings.HasPrefix(constraint, "npm:") {
+				descriptor := fmt.Sprintf("%s@%s", edge.Name, constraint)
+				m[targetKey] = appendUnique(m[targetKey], descriptor)
+			} else if isNonRegistryBerryConstraint(constraint) {
 				descriptor := fmt.Sprintf("%s@%s", edge.Name, constraint)
 				m[targetKey] = appendUnique(m[targetKey], descriptor)
 			} else {
@@ -341,7 +351,24 @@ func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, checksumPrefix str
 	node := pkg.Node
 
 	b.WriteString(fmt.Sprintf("  version: %s\n", node.Version))
-	b.WriteString(fmt.Sprintf("  resolution: \"%s@npm:%s\"\n", node.Name, node.Version))
+
+	// Resolution varies by dep type.
+	url := node.TarballURL
+	if strings.HasPrefix(url, "git+ssh://") || strings.HasPrefix(url, "git+https://") {
+		// Git dep: use constraint-based resolution with commit hash.
+		// Strip git+ prefix and convert to https for the resolution URL.
+		cleanURL := strings.TrimPrefix(url, "git+ssh://git@github.com/")
+		cleanURL = strings.TrimPrefix(cleanURL, "git+https://github.com/")
+		cleanURL = "https://github.com/" + cleanURL
+		// Replace # with #commit=
+		cleanURL = strings.Replace(cleanURL, "#", "#commit=", 1)
+		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", node.Name, cleanURL))
+	} else if strings.HasPrefix(url, "file:") {
+		// File dep: use file: URL as resolution.
+		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", node.Name, url))
+	} else {
+		b.WriteString(fmt.Sprintf("  resolution: \"%s@npm:%s\"\n", node.Name, node.Version))
+	}
 
 	// Dependencies (sorted by name).
 	if len(pkg.Dependencies) > 0 {
@@ -406,4 +433,15 @@ func integrityToYarnChecksum(integrity string, prefix string) string {
 	}
 
 	return prefix + hex.EncodeToString(decoded)
+}
+
+// isNonRegistryBerryConstraint checks if a constraint is a non-registry specifier.
+func isNonRegistryBerryConstraint(constraint string) bool {
+	prefixes := []string{"file:", "git+", "github:", "http://", "https://", "link:", "portal:", "patch:", "exec:"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(constraint, p) {
+			return true
+		}
+	}
+	return false
 }
