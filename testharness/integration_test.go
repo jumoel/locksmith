@@ -129,14 +129,17 @@ func TestIntegration(t *testing.T) {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
 					// Skip specific PM version crashes and unfixable PM-specific behaviors.
-					if fixture == "aliased-dep" && vc.PMName == "npm" && vc.PMVersion == "6" {
-						t.Skip("npm 6 crashes on npm: alias syntax (fetchSpec undefined)")
+					if fixture == "aliased-dep" && vc.PMName == "npm" {
+						if vc.PMVersion == "2" || vc.PMVersion == "5" || vc.PMVersion == "6" {
+							t.Skip("npm 2/5/6 crashes on npm: alias syntax")
+						}
 					}
 					// npm 2 crashes with ENOTDIR on packages with complex dep trees.
 					if vc.PMName == "npm" && vc.PMVersion == "2" {
 						npm2Crashes := map[string]bool{
 							"cli-tools": true, "deep-chain": true, "multiple-peer-providers": true,
 							"next-12": true, "npm-10": true, "peer-chain": true, "peer-deps": true,
+							"non-registry-deps": true,
 						}
 						if npm2Crashes[fixture] {
 							t.Skip("npm 2 crashes with ENOTDIR on complex dep trees")
