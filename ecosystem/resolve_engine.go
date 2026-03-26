@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,18 +115,27 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		if node, ok := s.nodes[key]; ok {
 			return node, nil
 		}
-		// For file: deps, try to read the real version from the local package.json.
-		// For other non-registry deps, use a placeholder.
+
 		version := "0.0.0-local"
+		resolvedURL := actualConstraint
+
 		if strings.HasPrefix(actualConstraint, "file:") && s.specDir != "" {
+			// file: deps - read version from local package.json.
 			if v := readLocalPackageVersion(s.specDir, strings.TrimPrefix(actualConstraint, "file:")); v != "" {
 				version = v
 			}
+		} else if owner, repo, ok := parseGitHubURL(actualConstraint); ok {
+			// GitHub deps - fetch version and commit hash via HTTPS API.
+			if info := resolveGitHubDep(s.ctx, owner, repo); info != nil {
+				version = info.Version
+				resolvedURL = fmt.Sprintf("git+ssh://git@github.com/%s/%s.git#%s", owner, repo, info.CommitHash)
+			}
 		}
+
 		node := &Node{
 			Name:       actualName,
 			Version:    version,
-			TarballURL: actualConstraint,
+			TarballURL: resolvedURL,
 		}
 		s.nodes[key] = node
 		s.nodeIndex.Add(actualName, node)
@@ -305,6 +315,89 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 
 // isNonRegistrySpecifier returns true if the constraint is a non-registry
 // dependency type that cannot be resolved from the npm registry.
+// gitHubDepInfo holds resolved metadata for a GitHub dependency.
+type gitHubDepInfo struct {
+	Version    string
+	CommitHash string
+}
+
+// parseGitHubURL extracts owner/repo from GitHub dependency specifiers.
+// Supports: github:owner/repo, git+ssh://git@github.com/owner/repo.git,
+// git+https://github.com/owner/repo.git
+func parseGitHubURL(constraint string) (owner, repo string, ok bool) {
+	// github:owner/repo
+	if strings.HasPrefix(constraint, "github:") {
+		parts := strings.SplitN(strings.TrimPrefix(constraint, "github:"), "/", 2)
+		if len(parts) == 2 {
+			return parts[0], strings.TrimSuffix(parts[1], ".git"), true
+		}
+	}
+	// git+ssh://git@github.com/owner/repo.git or git+https://github.com/owner/repo.git
+	for _, prefix := range []string{"git+ssh://git@github.com/", "git+https://github.com/", "git@github.com:"} {
+		if strings.HasPrefix(constraint, prefix) {
+			path := strings.TrimPrefix(constraint, prefix)
+			path = strings.TrimSuffix(path, ".git")
+			parts := strings.SplitN(path, "/", 2)
+			if len(parts) == 2 {
+				return parts[0], parts[1], true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// resolveGitHubDep fetches version and commit hash for a public GitHub repo.
+// Uses raw.githubusercontent.com for package.json (no auth needed for public repos)
+// and the GitHub API for the commit hash.
+func resolveGitHubDep(ctx context.Context, owner, repo string) *gitHubDepInfo {
+	// Fetch package.json to get version.
+	pkgURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/HEAD/package.json", owner, repo)
+	req, err := http.NewRequestWithContext(ctx, "GET", pkgURL, nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pkg); err != nil {
+		return nil
+	}
+
+	// Fetch commit hash via API.
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/HEAD", owner, repo)
+	req2, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil
+	}
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil || resp2.StatusCode != 200 {
+		if resp2 != nil {
+			resp2.Body.Close()
+		}
+		// Return with version but no hash.
+		return &gitHubDepInfo{Version: pkg.Version}
+	}
+	defer resp2.Body.Close()
+
+	var commit struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&commit); err != nil {
+		return &gitHubDepInfo{Version: pkg.Version}
+	}
+
+	return &gitHubDepInfo{Version: pkg.Version, CommitHash: commit.SHA}
+}
+
 // readLocalPackageVersion reads the version from a local package.json.
 // relPath is relative to specDir (e.g., "./local-pkg").
 func readLocalPackageVersion(specDir, relPath string) string {
