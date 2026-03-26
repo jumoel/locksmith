@@ -76,10 +76,9 @@ func TestBerryRootDepsQuoting(t *testing.T) {
 	}
 }
 
-// TestBerryConstraintDedup verifies that constraint deduplication only
-// happens for v8 (yarn 4), not v6 (yarn 3).
-func TestBerryConstraintDedup(t *testing.T) {
-	// Create a package with two constraints that resolve to the same version.
+// TestBerryConstraintPreservation verifies that all constraints are kept
+// when multiple ranges resolve to the same version. Yarn keeps all of them.
+func TestBerryConstraintPreservation(t *testing.T) {
 	node := &ecosystem.Node{Name: "tslib", Version: "2.8.1", Integrity: "sha512-fake"}
 	graph := &ecosystem.Graph{
 		Root: &ecosystem.Node{
@@ -91,7 +90,6 @@ func TestBerryConstraintDedup(t *testing.T) {
 		},
 		Nodes: map[string]*ecosystem.Node{"tslib@2.8.1": node},
 	}
-	// A second package also depends on tslib with a different constraint.
 	otherNode := &ecosystem.Node{
 		Name: "other", Version: "1.0.0", Integrity: "sha512-other",
 		Dependencies: []*ecosystem.Edge{
@@ -115,28 +113,23 @@ func TestBerryConstraintDedup(t *testing.T) {
 		},
 	}
 
-	// v6 (yarn 3) should keep BOTH constraints.
-	f6 := NewYarnBerryV6Formatter()
-	data6, err := f6.FormatFromResult(result, project)
-	if err != nil {
-		t.Fatalf("v6 format failed: %v", err)
-	}
-	out6 := string(data6)
-	if !strings.Contains(out6, "tslib@npm:^2.4.0") || !strings.Contains(out6, "tslib@npm:^2.8.0") {
-		t.Errorf("v6 should keep both constraints, got:\n%s", out6)
-	}
-
-	// v8 (yarn 4) should deduplicate to only ^2.8.0.
-	f8 := NewYarnBerryV8Formatter()
-	data8, err := f8.FormatFromResult(result, project)
-	if err != nil {
-		t.Fatalf("v8 format failed: %v", err)
-	}
-	out8 := string(data8)
-	if strings.Contains(out8, "tslib@npm:^2.4.0") {
-		t.Errorf("v8 should deduplicate ^2.4.0 when ^2.8.0 exists, got:\n%s", out8)
-	}
-	if !strings.Contains(out8, "tslib@npm:^2.8.0") {
-		t.Errorf("v8 should keep ^2.8.0, got:\n%s", out8)
+	// Both v6 AND v8 should keep ALL constraints.
+	for name, formatter := range map[string]interface {
+		FormatFromResult(*ResolveResult, *ecosystem.ProjectSpec) ([]byte, error)
+	}{
+		"v6": NewYarnBerryV6Formatter(),
+		"v8": NewYarnBerryV8Formatter(),
+	} {
+		data, err := formatter.FormatFromResult(result, project)
+		if err != nil {
+			t.Fatalf("%s format failed: %v", name, err)
+		}
+		out := string(data)
+		if !strings.Contains(out, "tslib@npm:^2.4.0") {
+			t.Errorf("%s should keep ^2.4.0 constraint, got:\n%s", name, out)
+		}
+		if !strings.Contains(out, "tslib@npm:^2.8.0") {
+			t.Errorf("%s should keep ^2.8.0 constraint, got:\n%s", name, out)
+		}
 	}
 }

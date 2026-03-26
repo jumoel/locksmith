@@ -104,7 +104,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	// Build entries: group constraints by resolved "name@version".
 	// In a flat resolution, each constraint on a given package name resolves to
 	// the same version, so we collect all constraints that point to each package.
-	constraintsByKey := buildConstraintMap(result, project, cfg.RootDepsNpmPrefix)
+	constraintsByKey := buildConstraintMap(result, project)
 
 	// Build sorted entries. Skip packages with no constraints (e.g., filtered
 	// out by platform but still in the Packages map).
@@ -133,10 +133,11 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	b.WriteString("# Manual changes might be lost - proceed with caution!\n")
 	b.WriteString("\n")
 
-	// Write metadata header. Omit cacheKey for empty projects (yarn omits it).
+	// Write metadata header. Yarn v6 (yarn 3) omits cacheKey for empty projects.
+	// Yarn v8 (yarn 4) always includes it.
 	b.WriteString("__metadata:\n")
 	b.WriteString(fmt.Sprintf("  version: %d\n", cfg.MetadataVersion))
-	if len(result.Packages) > 0 {
+	if len(result.Packages) > 0 || cfg.RootDepsNpmPrefix {
 		b.WriteString(fmt.Sprintf("  cacheKey: %s\n", cfg.CacheKey))
 	}
 
@@ -274,7 +275,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 
 // buildConstraintMap collects all "name@npm:constraint" strings that resolve
 // to each "name@version" key in the result.
-func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec, dedup bool) map[string][]string {
+func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) map[string][]string {
 	m := make(map[string][]string)
 
 	// Constraints from the root project's declared dependencies.
@@ -325,14 +326,9 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec, d
 		}
 	}
 
-	// Only yarn v8 (yarn 4) deduplicates constraints. v6 (yarn 3) keeps all.
-	if dedup {
-		for key, constraints := range m {
-			if len(constraints) > 1 {
-				m[key] = deduplicateConstraints(constraints)
-			}
-		}
-	}
+	// Note: yarn keeps ALL constraints for a resolved version, even redundant
+	// ones. No deduplication needed. If a constraint is missing, it means the
+	// edge that produced it was removed (e.g., by platform filtering).
 
 	return m
 }
