@@ -3,11 +3,21 @@ package pnpm
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/internal/maputil"
 	"gopkg.in/yaml.v3"
 )
+
+// specifierNode creates a scalar node for a specifier value, quoting it only
+// when YAML would misinterpret it (e.g., bare numbers like "1" becoming integers).
+func specifierNode(value string) *yaml.Node {
+	if _, err := strconv.ParseFloat(value, 64); err == nil {
+		return scalarNode(value, yaml.SingleQuotedStyle)
+	}
+	return scalarNode(value, 0)
+}
 
 // PnpmLockV9Formatter produces pnpm-lock.yaml lockfileVersion 9.0 output.
 // V9 splits package metadata (packages section) from dependency relationships
@@ -135,7 +145,7 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 		constraint := deps[name]
 
 		depNode := &yaml.Node{Kind: yaml.MappingNode}
-		addMapping(depNode, "specifier", scalarNode(constraint, yaml.SingleQuotedStyle))
+		addMapping(depNode, "specifier", specifierNode(constraint))
 		addMapping(depNode, "version", scalarNode(resolvedVersion, 0))
 		addMapping(node, name, depNode)
 	}
@@ -379,12 +389,14 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 
 	devFlags := computeDevFlags(result, project)
 
-	// Build lookup from dep name to resolved version via root edges.
+	// Build lookup from dep name to resolved version and target name via root edges.
 	rootVersions := make(map[string]string)
+	rootTargetNames := make(map[string]string) // edge name -> target real name (for aliases)
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
 				rootVersions[edge.Name] = edge.Target.Version
+				rootTargetNames[edge.Name] = edge.Target.Name
 			}
 		}
 	}
@@ -407,13 +419,24 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 		}
 		allDeps[d.Name] = d.Constraint
 	}
-	if len(allDeps) > 0 {
-		specNode := &yaml.Node{Kind: yaml.MappingNode}
-		specNames := maputil.SortedKeys(allDeps)
-		for _, name := range specNames {
-			addMapping(specNode, name, scalarNode(allDeps[name], yaml.SingleQuotedStyle))
+	// Always emit specifiers section - pnpm 4/5 crash if it's missing.
+	specNode := &yaml.Node{Kind: yaml.MappingNode}
+	specNames := maputil.SortedKeys(allDeps)
+	for _, name := range specNames {
+		addMapping(specNode, name, specifierNode(allDeps[name]))
+	}
+	addMapping(root, "specifiers", specNode)
+
+	// v5DepValue returns the dependency value for the v5 format.
+	// For aliases (dep name != target name), use the /target-name/version path.
+	// For regular deps, use just the version.
+	v5DepValue := func(depName string) string {
+		version := rootVersions[depName]
+		targetName := rootTargetNames[depName]
+		if targetName != "" && targetName != depName {
+			return buildV5PackageKey(targetName, version)
 		}
-		addMapping(root, "specifiers", specNode)
+		return version
 	}
 
 	// dependencies: map of regular dep names to resolved versions.
@@ -421,7 +444,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 		depsNode := &yaml.Node{Kind: yaml.MappingNode}
 		names := maputil.SortedKeys(deps)
 		for _, name := range names {
-			addMapping(depsNode, name, scalarNode(rootVersions[name], 0))
+			addMapping(depsNode, name, scalarNode(v5DepValue(name), 0))
 		}
 		addMapping(root, "dependencies", depsNode)
 	}
@@ -431,7 +454,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 		devNode := &yaml.Node{Kind: yaml.MappingNode}
 		names := maputil.SortedKeys(devDeps)
 		for _, name := range names {
-			addMapping(devNode, name, scalarNode(rootVersions[name], 0))
+			addMapping(devNode, name, scalarNode(v5DepValue(name), 0))
 		}
 		addMapping(root, "devDependencies", devNode)
 	}
@@ -584,13 +607,11 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 		}
 		allDeps[d.Name] = d.Constraint
 	}
-	if len(allDeps) > 0 {
-		specNode := &yaml.Node{Kind: yaml.MappingNode}
-		for _, name := range maputil.SortedKeys(allDeps) {
-			addMapping(specNode, name, scalarNode(allDeps[name], yaml.SingleQuotedStyle))
-		}
-		addMapping(root, "specifiers", specNode)
+	specNode := &yaml.Node{Kind: yaml.MappingNode}
+	for _, name := range maputil.SortedKeys(allDeps) {
+		addMapping(specNode, name, specifierNode(allDeps[name]))
 	}
+	addMapping(root, "specifiers", specNode)
 
 	if len(g.Regular) > 0 {
 		depsNode := &yaml.Node{Kind: yaml.MappingNode}
