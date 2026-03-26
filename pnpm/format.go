@@ -599,10 +599,12 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	devFlags := computeDevFlags(result, project)
 
 	rootVersions := make(map[string]string)
+	rootTargetNamesV4 := make(map[string]string)
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
 				rootVersions[edge.Name] = edge.Target.Version
+				rootTargetNamesV4[edge.Name] = edge.Target.Name
 			}
 		}
 	}
@@ -627,10 +629,20 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 	addMapping(root, "specifiers", specNode)
 
+	// v4DepValue returns the v4/v5.1 dep value, using path format for aliases.
+	v4DepValue := func(depName string) string {
+		version := rootVersions[depName]
+		targetName := rootTargetNamesV4[depName]
+		if targetName != "" && targetName != depName {
+			return buildV5PackageKey(targetName, version)
+		}
+		return version
+	}
+
 	if len(g.Regular) > 0 {
 		depsNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, name := range maputil.SortedKeys(g.Regular) {
-			addMapping(depsNode, name, scalarNode(rootVersions[name], 0))
+			addMapping(depsNode, name, scalarNode(v4DepValue(name), 0))
 		}
 		addMapping(root, "dependencies", depsNode)
 	}
@@ -638,7 +650,7 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	if len(g.Dev) > 0 {
 		devNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, name := range maputil.SortedKeys(g.Dev) {
-			addMapping(devNode, name, scalarNode(rootVersions[name], 0))
+			addMapping(devNode, name, scalarNode(v4DepValue(name), 0))
 		}
 		addMapping(root, "devDependencies", devNode)
 	}
