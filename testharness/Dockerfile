@@ -52,11 +52,22 @@ RUN npm install -g pnpm@4 --prefix /opt/pnpm4
 # pnpm@6 crashes on Node 22 - use @pnpm/exe which bundles its own Node.
 RUN npm install -g @pnpm/exe@6 --prefix /opt/pnpm6
 
-# Install bun and git.
-RUN apt-get update && apt-get install -y curl unzip git && \
+# Install bun, git, and openssh-client.
+RUN apt-get update && apt-get install -y curl unzip git openssh-client && \
     curl -fsSL https://bun.sh/install | bash && \
     ln -s /root/.bun/bin/bun /usr/local/bin/bun && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Pre-accept GitHub's SSH host key so git+ssh deps work without prompts.
+RUN mkdir -p /root/.ssh && \
+    ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null && \
+    chmod 600 /root/.ssh/known_hosts
+
+# npm always converts GitHub git URLs to SSH. Rewrite SSH back to HTTPS
+# and use a credential helper that supplies GITHUB_TOKEN (available in
+# GitHub Actions CI) for anonymous access to public repos.
+RUN git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" && \
+    git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN:-}"; }; f'
 
 
 # Helper scripts for version-switching.

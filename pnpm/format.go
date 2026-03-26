@@ -135,7 +135,7 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 		constraint := deps[name]
 
 		depNode := &yaml.Node{Kind: yaml.MappingNode}
-		addMapping(depNode, "specifier", scalarNode(constraint, 0))
+		addMapping(depNode, "specifier", scalarNode(constraint, yaml.SingleQuotedStyle))
 		addMapping(depNode, "version", scalarNode(resolvedVersion, 0))
 		addMapping(node, name, depNode)
 	}
@@ -411,7 +411,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 		specNode := &yaml.Node{Kind: yaml.MappingNode}
 		specNames := maputil.SortedKeys(allDeps)
 		for _, name := range specNames {
-			addMapping(specNode, name, scalarNode(allDeps[name], 0))
+			addMapping(specNode, name, scalarNode(allDeps[name], yaml.SingleQuotedStyle))
 		}
 		addMapping(root, "specifiers", specNode)
 	}
@@ -587,7 +587,7 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 	if len(allDeps) > 0 {
 		specNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, name := range maputil.SortedKeys(allDeps) {
-			addMapping(specNode, name, scalarNode(allDeps[name], 0))
+			addMapping(specNode, name, scalarNode(allDeps[name], yaml.SingleQuotedStyle))
 		}
 		addMapping(root, "specifiers", specNode)
 	}
