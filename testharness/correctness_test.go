@@ -220,6 +220,7 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 		SpecFile:       specData,
 		OutputFormat:   cc.Format,
 		PolicyOverride: cc.PolicyOverride,
+		Platform:       "linux/x64",
 	})
 	if err != nil {
 		t.Fatalf("locksmith Generate failed: %v", err)
