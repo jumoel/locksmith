@@ -154,7 +154,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 			sortKey: e.constraints[0],
 			write: func(b *strings.Builder) {
 				writeEntryKey(b, e.constraints)
-				writeEntryBody(b, e.pkg, cfg.ChecksumPrefix, cfg.SkipChecksum)
+				writeEntryBody(b, e.pkg, e.constraints[0], cfg.ChecksumPrefix, cfg.SkipChecksum)
 			},
 		})
 	}
@@ -189,8 +189,8 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 						}
 						constraint := depMap[name]
 						if cfg.RootDepsNpmPrefix {
-							// Don't double-prefix constraints that already start with "npm:".
-							if strings.HasPrefix(constraint, "npm:") {
+							// Don't add npm: prefix for non-registry constraints or npm: aliases.
+							if strings.HasPrefix(constraint, "npm:") || isNonRegistryBerryConstraint(constraint) {
 								b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, constraint))
 							} else {
 								b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, constraint))
@@ -290,12 +290,12 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 			if edge.Type == ecosystem.DepPeer {
 				continue
 			}
-			// For non-registry deps, use the constraint as part of the key
-			// to match the Packages map (which uses name@constraint for these).
+			// For non-registry deps, use edge.Name (dep alias) + constraint as the key
+			// to match the Packages map (which stores git deps under depName@constraint).
 			constraint := edge.Constraint
 			var targetKey string
 			if isNonRegistryBerryConstraint(constraint) {
-				targetKey = edge.Target.Name + "@" + constraint
+				targetKey = edge.Name + "@" + constraint
 			} else {
 				targetKey = edge.Target.Name + "@" + edge.Target.Version
 			}
@@ -410,25 +410,33 @@ func writeEntryKey(b *strings.Builder, constraints []string) {
 }
 
 // writeEntryBody writes the indented fields for a single package entry.
-func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, checksumPrefix string, skipChecksum bool) {
+func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, constraintKey string, checksumPrefix string, skipChecksum bool) {
 	node := pkg.Node
 
 	b.WriteString(fmt.Sprintf("  version: %s\n", node.Version))
 
+	// Extract the dep name from the constraint key (part before first @).
+	// For "git-pkg@github:owner/repo", depName = "git-pkg".
+	// For "wrappy@npm:^1.0.0", depName = "wrappy".
+	depName := node.Name
+	if atIdx := strings.Index(constraintKey, "@"); atIdx > 0 {
+		depName = constraintKey[:atIdx]
+	}
+
 	// Resolution varies by dep type.
 	url := node.TarballURL
 	if strings.HasPrefix(url, "git+ssh://") || strings.HasPrefix(url, "git+https://") {
-		// Git dep: use constraint-based resolution with commit hash.
-		// Strip git+ prefix and convert to https for the resolution URL.
+		// Git dep: use dep name + HTTPS URL with commit hash.
 		cleanURL := strings.TrimPrefix(url, "git+ssh://git@github.com/")
 		cleanURL = strings.TrimPrefix(cleanURL, "git+https://github.com/")
 		cleanURL = "https://github.com/" + cleanURL
-		// Replace # with #commit=
 		cleanURL = strings.Replace(cleanURL, "#", "#commit=", 1)
-		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", node.Name, cleanURL))
+		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", depName, cleanURL))
 	} else if strings.HasPrefix(url, "file:") {
-		// File dep: use file: URL as resolution.
-		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", node.Name, url))
+		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", depName, url))
+	} else if strings.HasPrefix(url, "https://") && strings.HasSuffix(url, ".tgz") {
+		// Tarball URL dep: use dep name + URL.
+		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", depName, url))
 	} else {
 		b.WriteString(fmt.Sprintf("  resolution: \"%s@npm:%s\"\n", node.Name, node.Version))
 	}
