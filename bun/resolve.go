@@ -80,7 +80,7 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 				if e.Type == ecosystem.DepOptional {
 					continue
 				}
-				deps[e.Target.Name] = DepInfo{
+				deps[e.Name] = DepInfo{
 					Constraint:      e.Constraint,
 					ResolvedName:    e.Target.Name,
 					ResolvedVersion: e.Target.Version,

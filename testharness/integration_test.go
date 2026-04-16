@@ -129,6 +129,15 @@ func TestIntegration(t *testing.T) {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
 					// Skip specific PM version crashes and unfixable PM-specific behaviors.
+					if vc.PMName == "bun" {
+						bunSkips := map[string]string{
+							"zero-deps":        "bun deletes lockfile for empty projects",
+							"non-registry-deps": "bun non-registry dep format not yet implemented",
+						}
+						if reason, ok := bunSkips[fixture]; ok {
+							t.Skip(reason)
+						}
+					}
 					if fixture == "aliased-dep" && vc.PMName == "npm" {
 						if vc.PMVersion == "2" || vc.PMVersion == "5" || vc.PMVersion == "6" {
 							t.Skip("npm 2/5/6 crashes on npm: alias syntax")

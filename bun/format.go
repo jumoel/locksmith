@@ -80,6 +80,18 @@ func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedjson.Map {
 // the bare name key, and nested versions get path keys like "parent/name"
 // reflecting the dependency chain that leads to them.
 func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
+	// Build alias map: when a root dependency's declared name differs from
+	// the resolved package name (npm aliases, git deps), bun expects the
+	// declared name as the package key.
+	aliasKey := make(map[string]string) // "resolvedName@version" -> declaredName
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil && edge.Name != edge.Target.Name {
+				aliasKey[edge.Target.Name+"@"+edge.Target.Version] = edge.Name
+			}
+		}
+	}
+
 	// First pass: find which names have multiple versions.
 	byName := make(map[string]map[string]*ResolvedPackage) // name -> version -> pkg
 	for _, pkg := range result.Packages {
@@ -105,8 +117,13 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 	for name, versions := range byName {
 		if len(versions) == 1 {
 			for _, pkg := range versions {
-				entries = append(entries, keyedPkg{key: name, pkg: pkg})
-				placed[name+"@"+pkg.Node.Version] = true
+				pkgKey := name + "@" + pkg.Node.Version
+				displayName := name
+				if alias, ok := aliasKey[pkgKey]; ok {
+					displayName = alias
+				}
+				entries = append(entries, keyedPkg{key: displayName, pkg: pkg})
+				placed[pkgKey] = true
 			}
 		}
 	}
@@ -132,23 +149,30 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 				continue
 			}
 			if pkg, ok := result.Packages[key]; ok {
-				entries = append(entries, keyedPkg{key: name, pkg: pkg})
+				displayName := name
+				if alias, ok := aliasKey[key]; ok {
+					displayName = alias
+				}
+				entries = append(entries, keyedPkg{key: displayName, pkg: pkg})
 				placed[key] = true
 				barePlaced[name] = true
-				usedKeys[name] = true
+				usedKeys[displayName] = true
 			}
 		}
 
 		// BFS to place nested versions with path keys.
-		// Track full path from root dep so we can build unique keys.
+		// Use declared dependency names (edge.Name) for path construction,
+		// not resolved names (edge.Target.Name), because bun resolves deps
+		// by the name used in the parent's dependency listing.
 		type walkItem struct {
-			path string // full path from root dep, e.g. "express/send"
+			path string // full path using declared names, e.g. "express/send"
+			name string // declared name of this node (may be alias)
 			node *ecosystem.Node
 		}
 		var queue []walkItem
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
-				queue = append(queue, walkItem{path: edge.Target.Name, node: edge.Target})
+				queue = append(queue, walkItem{path: edge.Name, name: edge.Name, node: edge.Target})
 			}
 		}
 		seen := make(map[string]bool)
@@ -167,21 +191,22 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 					continue
 				}
 				childKey := edge.Target.Name + "@" + edge.Target.Version
-				childPath := item.path + "/" + edge.Target.Name
+				childPath := item.path + "/" + edge.Name
 
 				if !placed[childKey] {
 					if pkg, ok := result.Packages[childKey]; ok {
 						// First version of a multi-version package gets bare name.
 						useBare := len(byName[edge.Target.Name]) > 1 && !barePlaced[edge.Target.Name]
 						if useBare {
-							entries = append(entries, keyedPkg{key: edge.Target.Name, pkg: pkg})
+							displayName := edge.Name
+							entries = append(entries, keyedPkg{key: displayName, pkg: pkg})
 							barePlaced[edge.Target.Name] = true
-							usedKeys[edge.Target.Name] = true
+							usedKeys[displayName] = true
 						} else {
 							// Try immediate parent/child first; if that
 							// would collide with an existing key, use the
 							// full path from the root dep.
-							pathKey := item.node.Name + "/" + edge.Target.Name
+							pathKey := item.name + "/" + edge.Name
 							if usedKeys[pathKey] {
 								pathKey = childPath
 							}
@@ -190,9 +215,21 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 						}
 						placed[childKey] = true
 					}
+				} else if edge.Name != edge.Target.Name {
+					// Alias dep (npm: syntax) where the resolved package is
+					// already placed under its real name. Bun creates separate
+					// package entries for alias names so they can be looked up
+					// by the declared dependency name.
+					aliasPathKey := item.name + "/" + edge.Name
+					if !usedKeys[aliasPathKey] {
+						if pkg, ok := result.Packages[childKey]; ok {
+							entries = append(entries, keyedPkg{key: aliasPathKey, pkg: pkg})
+							usedKeys[aliasPathKey] = true
+						}
+					}
 				}
 
-				queue = append(queue, walkItem{path: childPath, node: edge.Target})
+				queue = append(queue, walkItem{path: childPath, name: edge.Name, node: edge.Target})
 			}
 		}
 	}
