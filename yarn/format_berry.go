@@ -9,6 +9,7 @@ import (
 
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/internal/maputil"
+	"github.com/jumoel/locksmith/internal/semver"
 )
 
 // YarnBerryV4Formatter produces yarn.lock output in yarn berry v4 format (yarn 2.0 initial stable).
@@ -110,7 +111,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	// out by platform but still in the Packages map).
 	entries := make([]*berryEntry, 0, len(result.Packages))
 	for key, pkg := range result.Packages {
-		constraints := constraintsByKey[key]
+		constraints := deduplicateConstraints(constraintsByKey[key])
 		if len(constraints) == 0 {
 			continue
 		}
@@ -345,7 +346,7 @@ func deduplicateConstraints(constraints []string) []string {
 	type parsed struct {
 		full    string
 		name    string
-		version string
+		semver  *semver.Version
 	}
 
 	byName := make(map[string][]parsed)
@@ -359,7 +360,13 @@ func deduplicateConstraints(constraints []string) []string {
 		}
 		name := c[:atIdx]
 		ver := c[atIdx+6:] // after "@npm:^"
-		byName[name] = append(byName[name], parsed{full: c, name: name, version: ver})
+		sv, err := semver.Parse(ver)
+		if err != nil {
+			// Unparseable version, keep as-is.
+			byName[""] = append(byName[""], parsed{full: c})
+			continue
+		}
+		byName[name] = append(byName[name], parsed{full: c, name: name, semver: sv})
 	}
 
 	var result []string
@@ -373,7 +380,7 @@ func deduplicateConstraints(constraints []string) []string {
 		// Keep only the constraint with the highest version (most specific).
 		best := group[0]
 		for _, p := range group[1:] {
-			if p.version > best.version {
+			if p.semver.GreaterThan(best.semver) {
 				best = p
 			}
 		}
