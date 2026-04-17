@@ -219,6 +219,7 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		resolver = yarn.NewBerryResolver()
 		formatter = yarn.NewYarnBerryV8Formatter()
 	}
+	resolver.PolicyOverride = opts.PolicyOverride
 
 	spec, err := parser.Parse(opts.SpecFile)
 	if err != nil {

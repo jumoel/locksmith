@@ -14,6 +14,10 @@ type Resolver struct {
 	// (v2+) does.
 	AutoInstallPeers bool
 
+	// VersionSelection controls version picking behavior. Yarn classic uses
+	// the default (VersionSelectPreferLatest); yarn berry uses VersionSelectHighest.
+	VersionSelection ecosystem.VersionSelection
+
 	// PolicyOverride, if set, overrides the default resolution policy.
 	PolicyOverride *ecosystem.ResolverPolicy
 }
@@ -25,9 +29,12 @@ func NewResolver() *Resolver {
 }
 
 // NewBerryResolver returns a yarn resolver with peer auto-install enabled
-// (yarn berry v2+ behavior).
+// and highest-version selection (yarn berry v2+ behavior).
 func NewBerryResolver() *Resolver {
-	return &Resolver{AutoInstallPeers: true}
+	return &Resolver{
+		AutoInstallPeers: true,
+		VersionSelection: ecosystem.VersionSelectHighest,
+	}
 }
 
 // ResolveResult holds the yarn-specific resolution output.
@@ -58,16 +65,11 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 	packages := make(map[string]*ResolvedPackage)
 
 	policy := ecosystem.ResolverPolicy{
-		CrossTreeDedup:       false, // yarn resolves each constraint independently
-		AutoInstallPeers:     r.AutoInstallPeers,
-		PreferHighestVersion: true, // yarn ignores dist-tags, always picks highest
+		CrossTreeDedup:   false, // yarn resolves each constraint independently
+		AutoInstallPeers: r.AutoInstallPeers,
+		VersionSelection: r.VersionSelection,
 	}
-	if r.PolicyOverride != nil {
-		policy.CrossTreeDedup = r.PolicyOverride.CrossTreeDedup
-		policy.AutoInstallPeers = r.PolicyOverride.AutoInstallPeers
-		policy.StorePeerMetaOnNode = r.PolicyOverride.StorePeerMetaOnNode
-		policy.PreferHighestVersion = r.PolicyOverride.PreferHighestVersion
-	}
+	policy.ApplyOverride(r.PolicyOverride)
 	// OnNodeResolved is always set by this resolver, never overridden.
 	policy.OnNodeResolved = func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {
 		resolvedDeps := make(map[string]string)

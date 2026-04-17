@@ -14,6 +14,20 @@ import (
 	"github.com/jumoel/locksmith/internal/semver"
 )
 
+// VersionSelection controls version picking behavior during resolution.
+type VersionSelection int
+
+const (
+	// VersionSelectPreferLatest prefers the npm "latest" dist-tag if it
+	// satisfies the constraint, falling back to highest satisfying version.
+	// This is the default and matches npm, pnpm, bun, and yarn classic (v1).
+	VersionSelectPreferLatest VersionSelection = iota
+
+	// VersionSelectHighest always picks the highest satisfying version,
+	// ignoring dist-tags. Matches yarn berry (v2+) behavior.
+	VersionSelectHighest
+)
+
 // ResolverPolicy parameterizes the shared resolution algorithm.
 type ResolverPolicy struct {
 	// CrossTreeDedup: reuse an already-resolved version of a transitive dep
@@ -29,16 +43,27 @@ type ResolverPolicy struct {
 	// onto the Node (npm needs this for lockfile output).
 	StorePeerMetaOnNode bool
 
-	// PreferHighestVersion: always pick the highest satisfying version,
-	// ignoring the "latest" dist-tag (yarn behavior).
-	// When false, prefer the latest dist-tag if it satisfies the constraint
-	// (npm/pnpm/bun behavior per npm-pick-manifest).
-	PreferHighestVersion bool
+	// VersionSelection controls how the resolver picks a version when
+	// multiple versions satisfy a constraint. The zero value
+	// (VersionSelectPreferLatest) is the safe default for most PMs.
+	VersionSelection VersionSelection
 
 	// OnNodeResolved is called after each node is fully resolved including
 	// all transitive deps. PM-specific resolvers use this to collect their
 	// own bookkeeping data.
 	OnNodeResolved func(key string, node *Node, meta *VersionMetadata, edges []*Edge)
+}
+
+// ApplyOverride copies fields from override into the policy.
+// OnNodeResolved is never overridden - PM-specific resolvers always set it.
+func (p *ResolverPolicy) ApplyOverride(override *ResolverPolicy) {
+	if override == nil {
+		return
+	}
+	p.CrossTreeDedup = override.CrossTreeDedup
+	p.AutoInstallPeers = override.AutoInstallPeers
+	p.StorePeerMetaOnNode = override.StorePeerMetaOnNode
+	p.VersionSelection = override.VersionSelection
 }
 
 // resolverState holds state during resolution.
@@ -250,12 +275,13 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		}
 	}
 
-	// Version picking: yarn always uses the highest satisfying version.
-	// npm/pnpm/bun prefer the "latest" dist-tag per npm-pick-manifest.
+	// Version picking strategy: yarn berry uses highest satisfying version;
+	// npm/pnpm/bun/yarn classic prefer the "latest" dist-tag per npm-pick-manifest.
 	var best *semver.Version
-	if s.policy.PreferHighestVersion {
+	switch s.policy.VersionSelection {
+	case VersionSelectHighest:
 		best = semver.MaxSatisfying(parsed, c)
-	} else {
+	default: // VersionSelectPreferLatest
 		distTags, _ := s.registry.FetchDistTags(s.ctx, actualName)
 		best = semver.PickVersion(parsed, c, distTags["latest"])
 	}
