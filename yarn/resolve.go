@@ -58,13 +58,15 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 	packages := make(map[string]*ResolvedPackage)
 
 	policy := ecosystem.ResolverPolicy{
-		CrossTreeDedup:   false, // yarn resolves each constraint independently
-		AutoInstallPeers: r.AutoInstallPeers,
+		CrossTreeDedup:       false, // yarn resolves each constraint independently
+		AutoInstallPeers:     r.AutoInstallPeers,
+		PreferHighestVersion: true, // yarn ignores dist-tags, always picks highest
 	}
 	if r.PolicyOverride != nil {
 		policy.CrossTreeDedup = r.PolicyOverride.CrossTreeDedup
 		policy.AutoInstallPeers = r.PolicyOverride.AutoInstallPeers
 		policy.StorePeerMetaOnNode = r.PolicyOverride.StorePeerMetaOnNode
+		policy.PreferHighestVersion = r.PolicyOverride.PreferHighestVersion
 	}
 	// OnNodeResolved is always set by this resolver, never overridden.
 	policy.OnNodeResolved = func(key string, node *ecosystem.Node, meta *ecosystem.VersionMetadata, edges []*ecosystem.Edge) {

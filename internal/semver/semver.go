@@ -50,6 +50,11 @@ func (v *Version) Equal(other *Version) bool {
 	return v.inner.Equal(other.inner)
 }
 
+// Minor returns the minor version number.
+func (v *Version) Minor() uint64 {
+	return v.inner.Minor()
+}
+
 // Prerelease returns the prerelease string.
 func (v *Version) Prerelease() string {
 	return v.inner.Prerelease()

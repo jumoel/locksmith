@@ -29,6 +29,12 @@ type ResolverPolicy struct {
 	// onto the Node (npm needs this for lockfile output).
 	StorePeerMetaOnNode bool
 
+	// PreferHighestVersion: always pick the highest satisfying version,
+	// ignoring the "latest" dist-tag (yarn behavior).
+	// When false, prefer the latest dist-tag if it satisfies the constraint
+	// (npm/pnpm/bun behavior per npm-pick-manifest).
+	PreferHighestVersion bool
+
 	// OnNodeResolved is called after each node is fully resolved including
 	// all transitive deps. PM-specific resolvers use this to collect their
 	// own bookkeeping data.
@@ -244,9 +250,15 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		}
 	}
 
-	// npm-pick-manifest: prefer latest dist-tag.
-	distTags, _ := s.registry.FetchDistTags(s.ctx, actualName)
-	best := semver.PickVersion(parsed, c, distTags["latest"])
+	// Version picking: yarn always uses the highest satisfying version.
+	// npm/pnpm/bun prefer the "latest" dist-tag per npm-pick-manifest.
+	var best *semver.Version
+	if s.policy.PreferHighestVersion {
+		best = semver.MaxSatisfying(parsed, c)
+	} else {
+		distTags, _ := s.registry.FetchDistTags(s.ctx, actualName)
+		best = semver.PickVersion(parsed, c, distTags["latest"])
+	}
 	if best == nil {
 		return nil, fmt.Errorf("no version of %s satisfies %s", actualName, actualConstraint)
 	}

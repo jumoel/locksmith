@@ -111,7 +111,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	// out by platform but still in the Packages map).
 	entries := make([]*berryEntry, 0, len(result.Packages))
 	for key, pkg := range result.Packages {
-		constraints := deduplicateConstraints(constraintsByKey[key])
+		constraints := constraintsByKey[key]
 		if len(constraints) == 0 {
 			continue
 		}
@@ -377,14 +377,35 @@ func deduplicateConstraints(constraints []string) []string {
 			}
 			continue
 		}
-		// Keep only the constraint with the highest version (most specific).
-		best := group[0]
-		for _, p := range group[1:] {
-			if p.semver.GreaterThan(best.semver) {
-				best = p
+		// Dedup caret constraints that differ by minor version.
+		// Yarn deduplicates "^2.4.0" when "^2.8.0" exists (different minor),
+		// but keeps both "^1.0.1" and "^1.0.2" (same minor, different patch).
+		// Group by minor version and keep only the highest per minor group.
+		byMinor := make(map[uint64]parsed)
+		for _, p := range group {
+			minor := p.semver.Minor()
+			if existing, ok := byMinor[minor]; !ok || p.semver.GreaterThan(existing.semver) {
+				byMinor[minor] = p
 			}
 		}
-		result = append(result, best.full)
+		// If all constraints collapse to one minor group, keep only the highest.
+		// If multiple minor groups exist, keep only the highest overall
+		// (yarn deduplicates across minor versions).
+		if len(byMinor) == 1 {
+			// Same minor version - keep all constraints (yarn doesn't dedup patch differences).
+			for _, p := range group {
+				result = append(result, p.full)
+			}
+		} else {
+			// Different minor versions - keep only the highest constraint.
+			best := group[0]
+			for _, p := range group[1:] {
+				if p.semver.GreaterThan(best.semver) {
+					best = p
+				}
+			}
+			result = append(result, best.full)
+		}
 	}
 
 	sort.Strings(result)
@@ -507,6 +528,12 @@ func integrityToYarnChecksum(integrity string, prefix string) string {
 	}
 
 	return prefix + hex.EncodeToString(decoded)
+}
+
+// isNpmRegistryURL returns true if the URL is a standard npm registry tarball URL.
+func isNpmRegistryURL(url string) bool {
+	return strings.HasPrefix(url, "https://registry.npmjs.org/") ||
+		strings.HasPrefix(url, "https://registry.yarnpkg.com/")
 }
 
 // isNonRegistryBerryConstraint checks if a constraint is a non-registry specifier.

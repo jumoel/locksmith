@@ -76,10 +76,9 @@ func TestBerryRootDepsQuoting(t *testing.T) {
 	}
 }
 
-// TestBerryConstraintDedup verifies that redundant caret constraints are
-// deduplicated. When ^2.4.0 and ^2.8.0 both resolve to 2.8.1, yarn keeps
-// only the most specific one (^2.8.0).
-func TestBerryConstraintDedup(t *testing.T) {
+// TestBerryConstraintPreservation verifies that all constraints are kept
+// when multiple ranges resolve to the same version.
+func TestBerryConstraintPreservation(t *testing.T) {
 	node := &ecosystem.Node{Name: "tslib", Version: "2.8.1", Integrity: "sha512-fake"}
 	graph := &ecosystem.Graph{
 		Root: &ecosystem.Node{
@@ -114,7 +113,7 @@ func TestBerryConstraintDedup(t *testing.T) {
 		},
 	}
 
-	// Both v6 AND v8 should deduplicate: keep ^2.8.0, drop ^2.4.0.
+	// Both v6 AND v8 should keep ALL constraints.
 	for name, formatter := range map[string]interface {
 		FormatFromResult(*ResolveResult, *ecosystem.ProjectSpec) ([]byte, error)
 	}{
@@ -126,8 +125,8 @@ func TestBerryConstraintDedup(t *testing.T) {
 			t.Fatalf("%s format failed: %v", name, err)
 		}
 		out := string(data)
-		if strings.Contains(out, "tslib@npm:^2.4.0") {
-			t.Errorf("%s should deduplicate ^2.4.0 (redundant with ^2.8.0), got:\n%s", name, out)
+		if !strings.Contains(out, "tslib@npm:^2.4.0") {
+			t.Errorf("%s should keep ^2.4.0 constraint, got:\n%s", name, out)
 		}
 		if !strings.Contains(out, "tslib@npm:^2.8.0") {
 			t.Errorf("%s should keep ^2.8.0 constraint, got:\n%s", name, out)
