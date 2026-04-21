@@ -44,8 +44,9 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 	packages := make(map[string]*ResolvedPackage)
 
 	policy := ecosystem.ResolverPolicy{
-		CrossTreeDedup:   true,
-		AutoInstallPeers: true,
+		CrossTreeDedup:       true,
+		AutoInstallPeers:     true,
+		SkipOptionalPeerDeps: true,
 	}
 	policy.ApplyOverride(r.PolicyOverride)
 	// OnNodeResolved is always set by this resolver, never overridden.

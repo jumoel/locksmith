@@ -43,6 +43,13 @@ type ResolverPolicy struct {
 	// onto the Node (npm needs this for lockfile output).
 	StorePeerMetaOnNode bool
 
+	// SkipOptionalPeerDeps: skip regular dependencies that are also listed
+	// as optional peer dependencies (pnpm behavior). When a dep appears in
+	// both `dependencies` and `peerDependencies` with optional=true, pnpm
+	// treats the peer declaration as taking precedence and does not install
+	// the dep unless the consumer provides it.
+	SkipOptionalPeerDeps bool
+
 	// VersionSelection controls how the resolver picks a version when
 	// multiple versions satisfy a constraint. The zero value
 	// (VersionSelectPreferLatest) is the safe default for most PMs.
@@ -63,6 +70,7 @@ func (p *ResolverPolicy) ApplyOverride(override *ResolverPolicy) {
 	p.CrossTreeDedup = override.CrossTreeDedup
 	p.AutoInstallPeers = override.AutoInstallPeers
 	p.StorePeerMetaOnNode = override.StorePeerMetaOnNode
+	p.SkipOptionalPeerDeps = override.SkipOptionalPeerDeps
 	p.VersionSelection = override.VersionSelection
 }
 
@@ -348,6 +356,18 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	// Resolve transitive regular deps.
 	depNames := maputil.SortedKeys(meta.Dependencies)
 	for _, depName := range depNames {
+		// pnpm skips regular deps that are also optional peer deps.
+		// When a dep appears in both `dependencies` and `peerDependencies`
+		// with optional=true, the peer declaration takes precedence and the
+		// dep is only installed if the consumer provides it.
+		if s.policy.SkipOptionalPeerDeps {
+			if _, isPeer := meta.PeerDeps[depName]; isPeer {
+				if pm, hasMeta := meta.PeerDepsMeta[depName]; hasMeta && pm.Optional {
+					continue
+				}
+			}
+		}
+
 		depConstraint := meta.Dependencies[depName]
 		child, err := s.resolveDep(graph, depName, depConstraint, DepRegular)
 		if err != nil {
