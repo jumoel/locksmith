@@ -54,6 +54,41 @@ func applyPlatformFilter(graph *ecosystem.Graph, platform string) (map[string]bo
 	return ecosystem.FilterGraphByPlatform(graph, plat), nil
 }
 
+// unreachableKeys returns package keys that are not reachable from the graph
+// root. After platform filtering removes a parent node, its platform-agnostic
+// transitive deps may remain in the packages map despite being orphaned.
+func unreachableKeys(graph *ecosystem.Graph, packageKeys map[string]bool) map[string]bool {
+	if graph == nil || graph.Root == nil {
+		return nil
+	}
+	reachable := make(map[string]bool)
+	var walk func(node *ecosystem.Node)
+	walk = func(node *ecosystem.Node) {
+		if node == nil {
+			return
+		}
+		for _, edge := range node.Dependencies {
+			if edge.Target == nil {
+				continue
+			}
+			key := edge.Target.Name + "@" + edge.Target.Version
+			if reachable[key] {
+				continue
+			}
+			reachable[key] = true
+			walk(edge.Target)
+		}
+	}
+	walk(graph.Root)
+	orphaned := make(map[string]bool)
+	for key := range packageKeys {
+		if !reachable[key] {
+			orphaned[key] = true
+		}
+	}
+	return orphaned
+}
+
 // npmFormatter is implemented by all npm lockfile formatters.
 type npmFormatter interface {
 	FormatFromResult(result *npm.ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error)
@@ -246,6 +281,20 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 			if removed[depKey] {
 				delete(pkg.Dependencies, depName)
 			}
+		}
+	}
+	// Remove packages that became unreachable after platform filtering.
+	// When a platform-specific node is removed (e.g., @img/sharp-wasm32),
+	// its platform-agnostic transitive deps (e.g., @emnapi/runtime) may
+	// remain in result.Packages despite being unreachable from root.
+	// Their stale edges would pollute the berry constraint map.
+	if len(removed) > 0 {
+		pkgKeys := make(map[string]bool, len(result.Packages))
+		for k := range result.Packages {
+			pkgKeys[k] = true
+		}
+		for key := range unreachableKeys(result.Graph, pkgKeys) {
+			delete(result.Packages, key)
 		}
 	}
 
