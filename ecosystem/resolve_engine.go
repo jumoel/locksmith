@@ -76,30 +76,32 @@ func (p *ResolverPolicy) ApplyOverride(override *ResolverPolicy) {
 
 // resolverState holds state during resolution.
 type resolverState struct {
-	registry    Registry
-	cutoff      *time.Time
-	ctx         context.Context
-	nodes       map[string]*Node // "name@version" -> node
-	nodeIndex   *NodeIndex       // O(1) name lookups
-	resolving   map[string]bool  // cycle detection
-	projectDeps map[string]bool  // root dep names
-	policy      ResolverPolicy
-	specDir     string // for resolving file: deps
+	registry       Registry
+	cutoff         *time.Time
+	ctx            context.Context
+	nodes          map[string]*Node // "name@version" -> node
+	nodeIndex      *NodeIndex       // O(1) name lookups
+	resolving      map[string]bool  // cycle detection
+	projectDeps    map[string]bool  // root dep names
+	policy         ResolverPolicy
+	specDir        string // for resolving file: deps
+	workspaceIndex *WorkspaceIndex
 }
 
 // Resolve executes the shared dependency resolution algorithm.
 // PM-specific data is collected via the policy.OnNodeResolved callback.
 func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts ResolveOptions, policy ResolverPolicy) (*Graph, error) {
 	state := &resolverState{
-		registry:    registry,
-		cutoff:      opts.CutoffDate,
-		ctx:         ctx,
-		nodes:       make(map[string]*Node),
-		nodeIndex:   NewNodeIndex(),
-		resolving:   make(map[string]bool),
-		projectDeps: make(map[string]bool),
-		policy:      policy,
-		specDir:     opts.SpecDir,
+		registry:       registry,
+		cutoff:         opts.CutoffDate,
+		ctx:            ctx,
+		nodes:          make(map[string]*Node),
+		nodeIndex:      NewNodeIndex(),
+		resolving:      make(map[string]bool),
+		projectDeps:    make(map[string]bool),
+		policy:         policy,
+		specDir:        opts.SpecDir,
+		workspaceIndex: opts.WorkspaceIndex,
 	}
 
 	for _, dep := range project.Dependencies {
@@ -124,6 +126,32 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 		})
 	}
 
+	// Resolve workspace member dependencies.
+	if len(project.Workspaces) > 0 {
+		for _, member := range project.Workspaces {
+			if member.Spec == nil {
+				continue
+			}
+			memberNode := &Node{Name: member.Spec.Name, Version: member.Spec.Version}
+			for _, dep := range member.Spec.Dependencies {
+				node, err := state.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
+				if err != nil {
+					if dep.Type == DepOptional {
+						continue
+					}
+					return nil, fmt.Errorf("resolving %s@%s (workspace member %s): %w", dep.Name, dep.Constraint, member.RelPath, err)
+				}
+				memberNode.Dependencies = append(memberNode.Dependencies, &Edge{
+					Name: dep.Name, Constraint: dep.Constraint, Target: node, Type: dep.Type,
+				})
+			}
+			graph.Root.Dependencies = append(graph.Root.Dependencies, &Edge{
+				Name: member.Spec.Name, Constraint: "workspace:" + member.RelPath,
+				Target: memberNode, Type: DepRegular,
+			})
+		}
+	}
+
 	return graph, nil
 }
 
@@ -144,6 +172,42 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 			actualName = aliasSpec
 			actualConstraint = "*"
 		}
+	}
+
+	// Handle workspace: protocol - resolve to a local workspace member.
+	if strings.HasPrefix(actualConstraint, "workspace:") {
+		member := s.workspaceIndex.Resolve(actualName)
+		if member == nil {
+			return nil, fmt.Errorf("workspace member %q not found in workspace index", actualName)
+		}
+		key := member.Spec.Name + "@" + member.Spec.Version
+		// Prevent infinite recursion for circular workspace deps.
+		if s.resolving[key] {
+			node := &Node{Name: member.Spec.Name, Version: member.Spec.Version}
+			return node, nil
+		}
+		if node, ok := s.nodes[key]; ok {
+			return node, nil
+		}
+		s.resolving[key] = true
+		node := &Node{Name: member.Spec.Name, Version: member.Spec.Version}
+		s.nodes[key] = node
+		// Resolve the workspace member's own dependencies.
+		for _, dep := range member.Spec.Dependencies {
+			child, err := s.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
+			if err != nil {
+				if dep.Type == DepOptional {
+					continue
+				}
+				delete(s.resolving, key)
+				return nil, fmt.Errorf("resolving %s@%s (workspace member %s): %w", dep.Name, dep.Constraint, member.RelPath, err)
+			}
+			node.Dependencies = append(node.Dependencies, &Edge{
+				Name: dep.Name, Constraint: dep.Constraint, Target: child, Type: dep.Type,
+			})
+		}
+		delete(s.resolving, key)
+		return node, nil
 	}
 
 	// Detect non-registry dependency specifiers (file:, git+, github:, etc.).
@@ -576,7 +640,6 @@ func isNonRegistrySpecifier(constraint string) bool {
 		"file:", "link:", "portal:",       // local filesystem
 		"git+", "git://", "git@",         // git URLs
 		"github:", "bitbucket:", "gitlab:", // shorthand git hosts
-		"workspace:",                      // pnpm workspace protocol
 		"patch:", "exec:",                 // pnpm extensions
 		"http://", "https://",            // tarball URLs
 	}

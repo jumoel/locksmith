@@ -115,12 +115,25 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		formatter = npm.NewPackageLockV1Formatter()
 	}
 
-	spec, err := parser.Parse(opts.SpecFile)
-	if err != nil {
-		return nil, fmt.Errorf("parsing package.json: %w", err)
+	var spec *ecosystem.ProjectSpec
+	if len(opts.WorkspaceMembers) > 0 {
+		var err error
+		spec, err = parser.ParseWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
+		if err != nil {
+			return nil, fmt.Errorf("parsing workspace: %w", err)
+		}
+	} else {
+		var err error
+		spec, err = parser.Parse(opts.SpecFile)
+		if err != nil {
+			return nil, fmt.Errorf("parsing package.json: %w", err)
+		}
 	}
 
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
+	if spec.Workspaces != nil {
+		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
+	}
 	result, err := resolver.ResolveWithPlacement(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
@@ -190,12 +203,25 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		formatter = pnpm.NewPnpmLockV9Formatter()
 	}
 
-	spec, err := parser.Parse(opts.SpecFile)
-	if err != nil {
-		return nil, fmt.Errorf("parsing package.json: %w", err)
+	var spec *ecosystem.ProjectSpec
+	if len(opts.WorkspaceMembers) > 0 {
+		var err error
+		spec, err = parser.ParseWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
+		if err != nil {
+			return nil, fmt.Errorf("parsing workspace: %w", err)
+		}
+	} else {
+		var err error
+		spec, err = parser.Parse(opts.SpecFile)
+		if err != nil {
+			return nil, fmt.Errorf("parsing package.json: %w", err)
+		}
 	}
 
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
+	if spec.Workspaces != nil {
+		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
+	}
 	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
@@ -256,12 +282,25 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 	}
 	resolver.PolicyOverride = opts.PolicyOverride
 
-	spec, err := parser.Parse(opts.SpecFile)
-	if err != nil {
-		return nil, fmt.Errorf("parsing package.json: %w", err)
+	var spec *ecosystem.ProjectSpec
+	if len(opts.WorkspaceMembers) > 0 {
+		var err error
+		spec, err = parser.ParseWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
+		if err != nil {
+			return nil, fmt.Errorf("parsing workspace: %w", err)
+		}
+	} else {
+		var err error
+		spec, err = parser.Parse(opts.SpecFile)
+		if err != nil {
+			return nil, fmt.Errorf("parsing package.json: %w", err)
+		}
 	}
 
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
+	if spec.Workspaces != nil {
+		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
+	}
 	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
@@ -312,12 +351,25 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	resolver := bun.NewResolver()
 	formatter := bun.NewBunLockFormatter()
 
-	spec, err := parser.Parse(opts.SpecFile)
-	if err != nil {
-		return nil, fmt.Errorf("parsing package.json: %w", err)
+	var spec *ecosystem.ProjectSpec
+	if len(opts.WorkspaceMembers) > 0 {
+		var err error
+		spec, err = parser.ParseWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
+		if err != nil {
+			return nil, fmt.Errorf("parsing workspace: %w", err)
+		}
+	} else {
+		var err error
+		spec, err = parser.Parse(opts.SpecFile)
+		if err != nil {
+			return nil, fmt.Errorf("parsing package.json: %w", err)
+		}
 	}
 
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
+	if spec.Workspaces != nil {
+		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
+	}
 	result, err := resolver.ResolveForLockfile(ctx, spec, registry, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolving dependencies: %w", err)

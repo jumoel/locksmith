@@ -178,7 +178,8 @@ func TestIsNonRegistrySpecifier(t *testing.T) {
 		{"github: prefix", "github:owner/repo", true},
 		{"bitbucket: prefix", "bitbucket:owner/repo", true},
 		{"gitlab: prefix", "gitlab:owner/repo", true},
-		{"workspace: prefix", "workspace:^1.0.0", true},
+		// workspace: is handled explicitly before isNonRegistrySpecifier in resolveDep.
+		{"workspace: prefix", "workspace:^1.0.0", false},
 		{"patch: prefix", "patch:pkg@1.0.0#./fix.patch", true},
 		{"exec: prefix", "exec:./generate-pkg", true},
 		{"http:// prefix", "http://example.com/pkg.tgz", true},
