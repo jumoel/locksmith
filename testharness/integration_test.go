@@ -132,7 +132,7 @@ func TestIntegration(t *testing.T) {
 					if vc.PMName == "bun" {
 						bunSkips := map[string]string{
 							"zero-deps":        "bun deletes lockfile for empty projects",
-							"non-registry-deps": "bun non-registry dep format not yet implemented",
+							"non-registry-deps": "fixture has git+ssh:// deps that require SSH keys in Docker; formatter supports non-registry deps",
 						}
 						if reason, ok := bunSkips[fixture]; ok {
 							t.Skip(reason)

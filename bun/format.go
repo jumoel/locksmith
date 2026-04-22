@@ -73,6 +73,77 @@ func buildWorkspaceDeps(project *ecosystem.ProjectSpec) orderedjson.Map {
 	return entry
 }
 
+// nonRegInfo holds the original constraint and declared name for a
+// non-registry dependency so the formatter can produce 2-element entries.
+type nonRegInfo struct {
+	DeclaredName       string
+	OriginalConstraint string
+}
+
+// isNonRegistryConstraint checks whether a dependency constraint refers to a
+// non-registry source (file:, git+, github:, http(s):// etc.).
+func isNonRegistryConstraint(constraint string) bool {
+	prefixes := []string{
+		"file:", "link:", "portal:",
+		"git+", "git://", "git@",
+		"github:", "bitbucket:", "gitlab:",
+		"http://", "https://",
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(constraint, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildNonRegistryPackageEntry constructs the 2-element array for a
+// non-registry package entry in bun.lock. Non-registry deps use a simpler
+// format than registry deps: [specifier, resolvedURL].
+//
+// Returns nil if the dep doesn't match any non-registry pattern (fallback
+// to standard 4-element format).
+func buildNonRegistryPackageEntry(node *ecosystem.Node, declaredName, originalConstraint string) []interface{} {
+	switch {
+	case strings.HasPrefix(originalConstraint, "file:") || strings.HasPrefix(node.TarballURL, "file:"):
+		// File dep: [name@file:path, ""]
+		path := originalConstraint
+		if !strings.HasPrefix(path, "file:") {
+			path = node.TarballURL
+		}
+		return []interface{}{
+			declaredName + "@" + path,
+			"",
+		}
+
+	case strings.HasPrefix(node.TarballURL, "git+"):
+		// Git dep (resolved URL starts with git+): [name@constraint, resolvedName@url]
+		return []interface{}{
+			declaredName + "@" + originalConstraint,
+			node.Name + "@" + node.TarballURL,
+		}
+
+	case strings.HasPrefix(originalConstraint, "https://") || strings.HasPrefix(originalConstraint, "http://"):
+		// Tarball URL dep: [name@url, name@url]
+		return []interface{}{
+			declaredName + "@" + originalConstraint,
+			declaredName + "@" + originalConstraint,
+		}
+
+	case strings.HasPrefix(originalConstraint, "github:") ||
+		strings.HasPrefix(originalConstraint, "bitbucket:") ||
+		strings.HasPrefix(originalConstraint, "gitlab:"):
+		// Git shorthand that wasn't resolved to a git+ssh URL (placeholder).
+		return []interface{}{
+			declaredName + "@" + originalConstraint,
+			"",
+		}
+
+	default:
+		return nil
+	}
+}
+
 // buildPackagesFromGraph walks the dependency graph to build bun.lock's
 // packages section using hierarchical path keys.
 //
@@ -89,6 +160,21 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil && edge.Name != edge.Target.Name {
 				aliasKey[edge.Target.Name+"@"+edge.Target.Version] = edge.Name
+			}
+		}
+	}
+
+	// Build a map of non-registry dep info from root edges. This maps the
+	// node pointer to the original constraint so the formatter can detect
+	// non-registry deps and produce 2-element entries.
+	nonRegDeps := make(map[*ecosystem.Node]*nonRegInfo)
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil && isNonRegistryConstraint(edge.Constraint) {
+				nonRegDeps[edge.Target] = &nonRegInfo{
+					DeclaredName:       edge.Name,
+					OriginalConstraint: edge.Constraint,
+				}
 			}
 		}
 	}
@@ -426,6 +512,13 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 
 	packages := make(orderedjson.Map, 0, len(entries))
 	for _, e := range entries {
+		// Check if this is a non-registry dep that needs a 2-element entry.
+		if info, ok := nonRegDeps[e.pkg.Node]; ok {
+			if entry := buildNonRegistryPackageEntry(e.pkg.Node, info.DeclaredName, info.OriginalConstraint); entry != nil {
+				packages = append(packages, orderedjson.Entry{Key: e.key, Value: entry})
+				continue
+			}
+		}
 		packages = append(packages, orderedjson.Entry{Key: e.key, Value: buildPackageEntry(e.pkg, e.bundled)})
 	}
 

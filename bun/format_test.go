@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -469,6 +471,349 @@ func TestBunLockFormatter_RealRegistry(t *testing.T) {
 	}
 
 	t.Logf("generated %d bytes of bun.lock", len(output))
+}
+
+func TestBunLockFormatter_FileDepEntry(t *testing.T) {
+	// Build a ResolveResult with a file: dependency manually, bypassing the
+	// resolver, to test the formatter in isolation.
+	localNode := &ecosystem.Node{
+		Name:       "local-pkg",
+		Version:    "1.0.0",
+		TarballURL: "file:./local-pkg",
+	}
+
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{
+					Name:       "local-pkg",
+					Constraint: "file:./local-pkg",
+					Target:     localNode,
+					Type:       ecosystem.DepRegular,
+				},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{
+			"local-pkg@file:./local-pkg": localNode,
+		},
+	}
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"local-pkg@file:./local-pkg": {
+				Node:         localNode,
+				Dependencies: map[string]DepInfo{},
+			},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "local-pkg", Constraint: "file:./local-pkg", Type: ecosystem.DepRegular},
+		},
+	}
+
+	f := NewBunLockFormatter()
+	output, err := f.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	cleaned := stripTrailingCommas(output)
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(cleaned, &parsed); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, string(output))
+	}
+
+	packages := parsed["packages"].(map[string]interface{})
+	entry, ok := packages["local-pkg"]
+	if !ok {
+		t.Fatalf("missing local-pkg entry in packages; got keys: %v", packagesKeys(packages))
+	}
+
+	arr, ok := entry.([]interface{})
+	if !ok {
+		t.Fatalf("local-pkg entry is not an array")
+	}
+
+	if len(arr) != 2 {
+		t.Fatalf("local-pkg entry has %d elements, want 2; got: %v", len(arr), arr)
+	}
+
+	if arr[0] != "local-pkg@file:./local-pkg" {
+		t.Errorf("element 0 = %v, want %q", arr[0], "local-pkg@file:./local-pkg")
+	}
+	if arr[1] != "" {
+		t.Errorf("element 1 = %v, want empty string", arr[1])
+	}
+}
+
+func TestBunLockFormatter_GitDepEntry(t *testing.T) {
+	// GitHub-style git dep: constraint is "github:jonschlinkert/is-odd",
+	// resolved TarballURL is the git+ssh URL with commit hash.
+	gitNode := &ecosystem.Node{
+		Name:       "is-odd",
+		Version:    "3.0.1",
+		TarballURL: "git+ssh://git@github.com/jonschlinkert/is-odd.git#abc123def",
+	}
+
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{
+					Name:       "git-pkg",
+					Constraint: "github:jonschlinkert/is-odd",
+					Target:     gitNode,
+					Type:       ecosystem.DepRegular,
+				},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{
+			"is-odd@github:jonschlinkert/is-odd": gitNode,
+		},
+	}
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"is-odd@github:jonschlinkert/is-odd": {
+				Node:         gitNode,
+				Dependencies: map[string]DepInfo{},
+			},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "git-pkg", Constraint: "github:jonschlinkert/is-odd", Type: ecosystem.DepRegular},
+		},
+	}
+
+	f := NewBunLockFormatter()
+	output, err := f.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	cleaned := stripTrailingCommas(output)
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(cleaned, &parsed); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, string(output))
+	}
+
+	packages := parsed["packages"].(map[string]interface{})
+	// The entry key should be "git-pkg" (the declared alias name).
+	entry, ok := packages["git-pkg"]
+	if !ok {
+		t.Fatalf("missing git-pkg entry in packages; got keys: %v", packagesKeys(packages))
+	}
+
+	arr, ok := entry.([]interface{})
+	if !ok {
+		t.Fatalf("git-pkg entry is not an array")
+	}
+
+	if len(arr) != 2 {
+		t.Fatalf("git-pkg entry has %d elements, want 2; got: %v", len(arr), arr)
+	}
+
+	// Element 0: declared name + original constraint.
+	if arr[0] != "git-pkg@github:jonschlinkert/is-odd" {
+		t.Errorf("element 0 = %v, want %q", arr[0], "git-pkg@github:jonschlinkert/is-odd")
+	}
+	// Element 1: resolved URL with commit hash.
+	if arr[1] != "is-odd@git+ssh://git@github.com/jonschlinkert/is-odd.git#abc123def" {
+		t.Errorf("element 1 = %v, want %q", arr[1], "is-odd@git+ssh://git@github.com/jonschlinkert/is-odd.git#abc123def")
+	}
+}
+
+func TestBunLockFormatter_TarballDepEntry(t *testing.T) {
+	// Tarball URL dep: constraint is the full URL, resolved via registry.
+	tarballNode := &ecosystem.Node{
+		Name:       "is-odd",
+		Version:    "3.0.1",
+		TarballURL: "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz",
+		Integrity:  "sha512-fakehash",
+	}
+
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{
+					Name:       "tarball-pkg",
+					Constraint: "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz",
+					Target:     tarballNode,
+					Type:       ecosystem.DepRegular,
+				},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{
+			"is-odd@3.0.1": tarballNode,
+		},
+	}
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"is-odd@3.0.1": {
+				Node:         tarballNode,
+				Dependencies: map[string]DepInfo{},
+			},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "tarball-pkg", Constraint: "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz", Type: ecosystem.DepRegular},
+		},
+	}
+
+	f := NewBunLockFormatter()
+	output, err := f.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	cleaned := stripTrailingCommas(output)
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(cleaned, &parsed); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, string(output))
+	}
+
+	packages := parsed["packages"].(map[string]interface{})
+	// Entry key should be "tarball-pkg" (the declared alias name).
+	entry, ok := packages["tarball-pkg"]
+	if !ok {
+		t.Fatalf("missing tarball-pkg entry in packages; got keys: %v", packagesKeys(packages))
+	}
+
+	arr, ok := entry.([]interface{})
+	if !ok {
+		t.Fatalf("tarball-pkg entry is not an array")
+	}
+
+	if len(arr) != 2 {
+		t.Fatalf("tarball-pkg entry has %d elements, want 2; got: %v", len(arr), arr)
+	}
+
+	url := "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz"
+	if arr[0] != "tarball-pkg@"+url {
+		t.Errorf("element 0 = %v, want %q", arr[0], "tarball-pkg@"+url)
+	}
+	if arr[1] != "tarball-pkg@"+url {
+		t.Errorf("element 1 = %v, want %q", arr[1], "tarball-pkg@"+url)
+	}
+}
+
+func TestBunLockFormatter_NonRegistryDeps_RealRegistry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real registry test in short mode")
+	}
+
+	// Create a temp workspace with a local-pkg subdirectory.
+	tmpDir := t.TempDir()
+
+	// Create local-pkg/package.json.
+	localDir := tmpDir + "/local-pkg"
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localDir+"/package.json", []byte(`{"name":"local-pkg","version":"1.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	specJSON := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {
+			"ms": "^2.1.0",
+			"local-pkg": "file:./local-pkg"
+		}
+	}`)
+
+	parser := npm.NewSpecParser()
+	spec, err := parser.Parse(specJSON)
+	if err != nil {
+		t.Fatalf("parse spec: %v", err)
+	}
+
+	registry := npm.NewRegistryClient("")
+	resolver := NewResolver()
+	result, err := resolver.ResolveForLockfile(context.Background(), spec, registry, ecosystem.ResolveOptions{
+		SpecDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	formatter := NewBunLockFormatter()
+	output, err := formatter.FormatFromResult(result, spec)
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+
+	// Validate JSONC.
+	cleaned := stripTrailingCommas(output)
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(cleaned, &parsed); err != nil {
+		t.Fatalf("output is not valid JSONC: %v\n%s", err, truncate(output, 500))
+	}
+
+	packages, ok := parsed["packages"].(map[string]interface{})
+	if !ok {
+		t.Fatal("packages is not an object")
+	}
+
+	// Verify ms is a 4-element array (normal registry dep).
+	msEntry, ok := packages["ms"]
+	if !ok {
+		t.Fatal("missing ms entry in packages")
+	}
+	msArr, ok := msEntry.([]interface{})
+	if !ok {
+		t.Fatal("ms entry is not an array")
+	}
+	if len(msArr) != 4 {
+		t.Errorf("ms entry has %d elements, want 4 (normal registry dep)", len(msArr))
+	}
+
+	// Verify local-pkg is a 2-element array (file: dep).
+	localEntry, ok := packages["local-pkg"]
+	if !ok {
+		t.Fatalf("missing local-pkg entry in packages; got keys: %v", packagesKeys(packages))
+	}
+	localArr, ok := localEntry.([]interface{})
+	if !ok {
+		t.Fatal("local-pkg entry is not an array")
+	}
+	if len(localArr) != 2 {
+		t.Errorf("local-pkg entry has %d elements, want 2 (file: dep); got: %v", len(localArr), localArr)
+	}
+
+	t.Logf("generated %d bytes of bun.lock", len(output))
+}
+
+// packagesKeys returns sorted keys from a packages map for diagnostics.
+func packagesKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func truncate(data []byte, n int) string {
