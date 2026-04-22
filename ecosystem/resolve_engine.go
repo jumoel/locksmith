@@ -132,7 +132,7 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 			if member.Spec == nil {
 				continue
 			}
-			memberNode := &Node{Name: member.Spec.Name, Version: member.Spec.Version}
+			memberNode := &Node{Name: member.Spec.Name, Version: member.Spec.Version, WorkspacePath: member.RelPath}
 			for _, dep := range member.Spec.Dependencies {
 				node, err := state.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
 				if err != nil {
@@ -183,14 +183,14 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		key := member.Spec.Name + "@" + member.Spec.Version
 		// Prevent infinite recursion for circular workspace deps.
 		if s.resolving[key] {
-			node := &Node{Name: member.Spec.Name, Version: member.Spec.Version}
+			node := &Node{Name: member.Spec.Name, Version: member.Spec.Version, WorkspacePath: member.RelPath}
 			return node, nil
 		}
 		if node, ok := s.nodes[key]; ok {
 			return node, nil
 		}
 		s.resolving[key] = true
-		node := &Node{Name: member.Spec.Name, Version: member.Spec.Version}
+		node := &Node{Name: member.Spec.Name, Version: member.Spec.Version, WorkspacePath: member.RelPath}
 		s.nodes[key] = node
 		// Resolve the workspace member's own dependencies.
 		for _, dep := range member.Spec.Dependencies {

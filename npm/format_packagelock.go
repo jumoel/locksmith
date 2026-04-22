@@ -40,8 +40,30 @@ func (f *PackageLockV3Formatter) FormatFromResult(result *ResolveResult, project
 	// All placed packages.
 	for path, placed := range result.PlacedNodes {
 		packages[path] = buildPackageEntry(placed.Node)
-		// file: deps also need a top-level directory entry with their version.
-		if strings.HasPrefix(placed.Node.TarballURL, "file:") {
+		// Workspace members need a directory entry with their full spec.
+		if placed.Node.WorkspacePath != "" {
+			wsEntry := orderedjson.Map{
+				{Key: "name", Value: placed.Node.Name},
+				{Key: "version", Value: placed.Node.Version},
+			}
+			// Include the workspace member's dependencies.
+			if project != nil {
+				for _, ws := range project.Workspaces {
+					if ws.Spec != nil && ws.Spec.Name == placed.Node.Name {
+						g := ecosystem.GroupDependenciesByType(ws.Spec.Dependencies)
+						if len(g.Regular) > 0 {
+							wsEntry = append(wsEntry, orderedjson.Entry{Key: "dependencies", Value: orderedjson.FromStringMap(g.Regular)})
+						}
+						if len(g.Dev) > 0 {
+							wsEntry = append(wsEntry, orderedjson.Entry{Key: "devDependencies", Value: orderedjson.FromStringMap(g.Dev)})
+						}
+						break
+					}
+				}
+			}
+			packages[placed.Node.WorkspacePath] = wsEntry
+		} else if strings.HasPrefix(placed.Node.TarballURL, "file:") {
+			// file: deps also need a top-level directory entry with their version.
 			dirName := strings.TrimPrefix(placed.Node.TarballURL, "file:")
 			dirName = strings.TrimPrefix(dirName, "./")
 			packages[dirName] = orderedjson.Map{
@@ -102,6 +124,14 @@ func buildRootEntry(project *ecosystem.ProjectSpec) orderedjson.Map {
 // dependencies, optionalDependencies, peerDependencies, peerDependenciesMeta,
 // bin, engines, os, cpu, funding, deprecated.
 func buildPackageEntry(node *ecosystem.Node) orderedjson.Map {
+	// Workspace members are symlinks - emit link format.
+	if node.WorkspacePath != "" {
+		return orderedjson.Map{
+			{Key: "resolved", Value: node.WorkspacePath},
+			{Key: "link", Value: true},
+		}
+	}
+
 	// file: dependencies are symlinks - emit link format instead of regular entry.
 	if strings.HasPrefix(node.TarballURL, "file:") {
 		dirName := strings.TrimPrefix(node.TarballURL, "file:")

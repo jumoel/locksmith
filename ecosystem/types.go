@@ -44,6 +44,9 @@ type Node struct {
 	// BundleDeps lists packages declared in bundleDependencies.
 	// When non-empty, bun nests all transitive deps under this package's key.
 	BundleDeps map[string]bool
+	// WorkspacePath is the relative path from the project root to this workspace
+	// member (e.g., "packages/lib-a"). Empty for non-workspace nodes.
+	WorkspacePath string
 }
 
 // Edge represents a dependency relationship.
