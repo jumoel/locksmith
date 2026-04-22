@@ -172,17 +172,33 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 			},
 		})
 
+		// Collect cross-workspace dependency constraints per member.
+		// When lib-b depends on lib-a via "workspace:*", the lib-a entry
+		// needs "workspace:*" as an additional constraint key.
+		wsExtraConstraints := make(map[string][]string) // member name -> extra constraints
+		for _, member := range project.Workspaces {
+			if member.Spec == nil {
+				continue
+			}
+			for _, dep := range member.Spec.Dependencies {
+				if strings.HasPrefix(dep.Constraint, "workspace:") {
+					wsExtraConstraints[dep.Name] = append(wsExtraConstraints[dep.Name], dep.Constraint)
+				}
+			}
+		}
+
 		// Add workspace member entries.
 		for _, member := range project.Workspaces {
 			if member.Spec == nil || member.Spec.Name == "" {
 				continue
 			}
 			m := member // capture for closure
+			extras := wsExtraConstraints[m.Spec.Name]
 			memberConstraint := fmt.Sprintf("%s@workspace:%s", m.Spec.Name, m.RelPath)
 			allEntries = append(allEntries, sortableEntry{
 				sortKey: memberConstraint,
 				write: func(b *strings.Builder) {
-					writeBerryWorkspaceEntry(b, m.Spec.Name, m.RelPath, m.Spec.Dependencies, m.Spec.PeerDepsMeta, cfg)
+					writeBerryWorkspaceEntry(b, m.Spec.Name, m.RelPath, m.Spec.Dependencies, m.Spec.PeerDepsMeta, cfg, extras...)
 				},
 			})
 		}
@@ -213,10 +229,23 @@ func workspaceMemberNamesYarn(project *ecosystem.ProjectSpec) map[string]bool {
 
 // writeBerryWorkspaceEntry writes a workspace entry (root or member) to the
 // yarn berry lockfile. workspacePath is "." for root or the relative path
-// (e.g., "packages/lib-a") for members.
-func writeBerryWorkspaceEntry(b *strings.Builder, name, workspacePath string, deps []ecosystem.DeclaredDep, peerDepsMeta map[string]ecosystem.PeerDepMeta, cfg berryConfig) {
+// (e.g., "packages/lib-a") for members. extraConstraints are additional
+// constraint keys from cross-workspace deps (e.g., "workspace:*").
+func writeBerryWorkspaceEntry(b *strings.Builder, name, workspacePath string, deps []ecosystem.DeclaredDep, peerDepsMeta map[string]ecosystem.PeerDepMeta, cfg berryConfig, extraConstraints ...string) {
 	constraint := fmt.Sprintf("%s@workspace:%s", name, workspacePath)
-	b.WriteString(fmt.Sprintf("%q:\n", constraint))
+	if len(extraConstraints) > 0 {
+		// Combine the primary constraint with extra constraint keys.
+		// e.g., "@workspace/lib-a@workspace:*, @workspace/lib-a@workspace:packages/lib-a"
+		allConstraints := make([]string, 0, len(extraConstraints)+1)
+		for _, ec := range extraConstraints {
+			allConstraints = append(allConstraints, fmt.Sprintf("%s@%s", name, ec))
+		}
+		allConstraints = append(allConstraints, constraint)
+		sort.Strings(allConstraints)
+		b.WriteString(fmt.Sprintf("%q:\n", strings.Join(allConstraints, ", ")))
+	} else {
+		b.WriteString(fmt.Sprintf("%q:\n", constraint))
+	}
 	b.WriteString(fmt.Sprintf("  version: %s\n", "0.0.0-use.local"))
 	b.WriteString(fmt.Sprintf("  resolution: \"%s@workspace:%s\"\n", name, workspacePath))
 

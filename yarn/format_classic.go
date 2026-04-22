@@ -121,6 +121,10 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 			if edge.Target == nil {
 				continue
 			}
+			// Skip edges to workspace members.
+			if edge.Target.WorkspacePath != "" {
+				continue
+			}
 			key := classicEdgeKey(edge)
 			versionConstraints[key] = append(versionConstraints[key], constraintInfo{
 				name:       edge.Name,
@@ -134,6 +138,10 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 
 	for key, pkg := range result.Packages {
 		if pkg.Node == nil {
+			continue
+		}
+		// Skip workspace members - they get their own entries below.
+		if pkg.Node.WorkspacePath != "" {
 			continue
 		}
 
