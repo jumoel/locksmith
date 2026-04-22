@@ -1,10 +1,14 @@
 package yarn
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/npm"
 )
 
 // TestBerryRootDepsQuoting verifies that YAML-special constraint values
@@ -235,6 +239,347 @@ func TestBerryPeerDepsMetaAllOptional(t *testing.T) {
 	}
 	if !strings.Contains(output, "    react-dom:\n      optional: true\n") {
 		t.Error("react-dom should be marked optional")
+	}
+}
+
+// TestBerryFileDepEntry verifies that file: dependencies produce the correct
+// berry lockfile entry with portal: resolution and soft linkType.
+func TestBerryFileDepEntry(t *testing.T) {
+	localNode := &ecosystem.Node{
+		Name:       "local-pkg",
+		Version:    "0.0.0-local",
+		TarballURL: "file:./local-pkg",
+	}
+
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test-project",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{
+					Name:       "local-pkg",
+					Constraint: "file:./local-pkg",
+					Target:     localNode,
+					Type:       ecosystem.DepRegular,
+				},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{
+			"local-pkg@file:./local-pkg": localNode,
+		},
+	}
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"local-pkg@file:./local-pkg": {
+				Node:         localNode,
+				Dependencies: map[string]string{},
+			},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "local-pkg", Constraint: "file:./local-pkg", Type: ecosystem.DepRegular},
+		},
+	}
+
+	for name, formatter := range map[string]interface {
+		FormatFromResult(*ResolveResult, *ecosystem.ProjectSpec) ([]byte, error)
+	}{
+		"v6": NewYarnBerryV6Formatter(),
+		"v8": NewYarnBerryV8Formatter(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := formatter.FormatFromResult(result, project)
+			if err != nil {
+				t.Fatalf("FormatFromResult failed: %v", err)
+			}
+			output := string(data)
+
+			// Constraint key should use file: protocol.
+			if !strings.Contains(output, `"local-pkg@file:./local-pkg"`) {
+				t.Errorf("missing file: constraint key in output:\n%s", output)
+			}
+
+			// Resolution should use portal: with locator suffix.
+			expectedRes := `"local-pkg@portal:./local-pkg::locator=test-project%40workspace%3A."`
+			if !strings.Contains(output, expectedRes) {
+				t.Errorf("expected portal: resolution %s, got:\n%s", expectedRes, output)
+			}
+
+			// linkType must be soft for file: deps.
+			// Find the file dep entry and check its linkType.
+			entryIdx := strings.Index(output, `"local-pkg@file:./local-pkg"`)
+			if entryIdx == -1 {
+				t.Fatal("file dep entry not found")
+			}
+			entrySection := output[entryIdx:]
+			// Find the next entry boundary (double newline or end).
+			nextEntry := strings.Index(entrySection[1:], "\n\n")
+			if nextEntry > 0 {
+				entrySection = entrySection[:nextEntry+1]
+			}
+			if !strings.Contains(entrySection, "linkType: soft") {
+				t.Errorf("file dep should have linkType: soft, got:\n%s", entrySection)
+			}
+			if strings.Contains(entrySection, "linkType: hard") {
+				t.Errorf("file dep should NOT have linkType: hard, got:\n%s", entrySection)
+			}
+		})
+	}
+}
+
+// TestBerryGitDepEntry verifies that git/github dependencies produce the
+// correct berry lockfile entry with https resolution and commit hash.
+func TestBerryGitDepEntry(t *testing.T) {
+	gitNode := &ecosystem.Node{
+		Name:       "is-odd",
+		Version:    "3.0.1",
+		TarballURL: "git+ssh://git@github.com/jonschlinkert/is-odd.git#abc123",
+	}
+
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test-project",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{
+					Name:       "git-pkg",
+					Constraint: "github:jonschlinkert/is-odd",
+					Target:     gitNode,
+					Type:       ecosystem.DepRegular,
+				},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{
+			"is-odd@github:jonschlinkert/is-odd": gitNode,
+		},
+	}
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"is-odd@github:jonschlinkert/is-odd": {
+				Node:         gitNode,
+				Dependencies: map[string]string{},
+			},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "git-pkg", Constraint: "github:jonschlinkert/is-odd", Type: ecosystem.DepRegular},
+		},
+	}
+
+	for name, formatter := range map[string]interface {
+		FormatFromResult(*ResolveResult, *ecosystem.ProjectSpec) ([]byte, error)
+	}{
+		"v6": NewYarnBerryV6Formatter(),
+		"v8": NewYarnBerryV8Formatter(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := formatter.FormatFromResult(result, project)
+			if err != nil {
+				t.Fatalf("FormatFromResult failed: %v", err)
+			}
+			output := string(data)
+
+			// Constraint key should contain the dep alias and github constraint.
+			if !strings.Contains(output, `"git-pkg@github:jonschlinkert/is-odd"`) {
+				t.Errorf("missing github constraint key in output:\n%s", output)
+			}
+
+			// Resolution should use https URL with #commit= format.
+			expectedRes := `"git-pkg@https://github.com/jonschlinkert/is-odd.git#commit=abc123"`
+			if !strings.Contains(output, expectedRes) {
+				t.Errorf("expected git resolution %s, got:\n%s", expectedRes, output)
+			}
+
+			// linkType must be hard for git deps.
+			entryIdx := strings.Index(output, `"git-pkg@github:jonschlinkert/is-odd"`)
+			if entryIdx == -1 {
+				t.Fatal("git dep entry not found")
+			}
+			entrySection := output[entryIdx:]
+			nextEntry := strings.Index(entrySection[1:], "\n\n")
+			if nextEntry > 0 {
+				entrySection = entrySection[:nextEntry+1]
+			}
+			if !strings.Contains(entrySection, "linkType: hard") {
+				t.Errorf("git dep should have linkType: hard, got:\n%s", entrySection)
+			}
+		})
+	}
+}
+
+// TestBerryTarballDepEntry verifies that tarball URL dependencies that resolved
+// to a known npm package produce the correct berry lockfile entry with npm resolution.
+func TestBerryTarballDepEntry(t *testing.T) {
+	tarballNode := &ecosystem.Node{
+		Name:       "is-odd",
+		Version:    "3.0.1",
+		TarballURL: "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz",
+		Integrity:  "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+	}
+
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test-project",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{
+					Name:       "tarball-pkg",
+					Constraint: "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz",
+					Target:     tarballNode,
+					Type:       ecosystem.DepRegular,
+				},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{
+			"is-odd@3.0.1": tarballNode,
+		},
+	}
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"is-odd@3.0.1": {
+				Node:         tarballNode,
+				Dependencies: map[string]string{},
+			},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "tarball-pkg", Constraint: "https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz", Type: ecosystem.DepRegular},
+		},
+	}
+
+	for name, formatter := range map[string]interface {
+		FormatFromResult(*ResolveResult, *ecosystem.ProjectSpec) ([]byte, error)
+	}{
+		"v6": NewYarnBerryV6Formatter(),
+		"v8": NewYarnBerryV8Formatter(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := formatter.FormatFromResult(result, project)
+			if err != nil {
+				t.Fatalf("FormatFromResult failed: %v", err)
+			}
+			output := string(data)
+
+			// Tarball dep that resolved to a known npm package should use npm resolution.
+			if !strings.Contains(output, `"is-odd@npm:3.0.1"`) {
+				t.Errorf("tarball dep should have npm resolution, got:\n%s", output)
+			}
+
+			// Should have a checksum (since it's a real npm package with integrity).
+			if name == "v6" {
+				if !strings.Contains(output, "checksum: ") {
+					t.Errorf("tarball dep should have checksum in %s, got:\n%s", name, output)
+				}
+			}
+			if name == "v8" {
+				if !strings.Contains(output, "checksum: 10/") {
+					t.Errorf("tarball dep should have checksum with 10/ prefix in %s, got:\n%s", name, output)
+				}
+			}
+
+			// linkType must be hard for tarball deps.
+			if !strings.Contains(output, "linkType: hard") {
+				t.Errorf("tarball dep should have linkType: hard, got:\n%s", output)
+			}
+		})
+	}
+}
+
+// TestBerryNonRegistryDeps_RealRegistry is an end-to-end test that exercises the
+// full berry pipeline (parse, resolve, format) with a fixture containing file: deps
+// and regular deps, using the real npm registry.
+func TestBerryNonRegistryDeps_RealRegistry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real registry test in short mode")
+	}
+
+	// Create a temp workspace with a local-pkg subdirectory.
+	tmpDir := t.TempDir()
+	localPkgDir := filepath.Join(tmpDir, "local-pkg")
+	if err := os.MkdirAll(localPkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localPkgDir, "package.json"), []byte(`{"name":"local-pkg","version":"1.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	specJSON := []byte(`{
+		"name": "berry-nonreg-test",
+		"version": "1.0.0",
+		"dependencies": {
+			"ms": "^2.1.0",
+			"local-pkg": "file:./local-pkg"
+		}
+	}`)
+
+	parser := npm.NewSpecParser()
+	spec, err := parser.Parse(specJSON)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	registry := npm.NewRegistryClient("")
+	resolver := NewBerryResolver()
+	resolveOpts := ecosystem.ResolveOptions{SpecDir: tmpDir}
+
+	result, err := resolver.ResolveForLockfile(context.Background(), spec, registry, resolveOpts)
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	for name, formatter := range map[string]interface {
+		FormatFromResult(*ResolveResult, *ecosystem.ProjectSpec) ([]byte, error)
+	}{
+		"v6": NewYarnBerryV6Formatter(),
+		"v8": NewYarnBerryV8Formatter(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := formatter.FormatFromResult(result, spec)
+			if err != nil {
+				t.Fatalf("FormatFromResult failed: %v", err)
+			}
+			output := string(data)
+
+			// Should contain the local-pkg file dep.
+			if !strings.Contains(output, "local-pkg@file:./local-pkg") {
+				t.Errorf("missing local-pkg file dep in output:\n%s", output)
+			}
+
+			// Should contain portal: resolution with locator.
+			if !strings.Contains(output, "portal:./local-pkg::locator=") {
+				t.Errorf("missing portal: resolution in output:\n%s", output)
+			}
+
+			// Should contain the ms npm dep.
+			if !strings.Contains(output, "ms@npm:") {
+				t.Errorf("missing ms npm dep in output:\n%s", output)
+			}
+
+			// Should contain the __metadata header.
+			if !strings.Contains(output, "__metadata:") {
+				t.Errorf("missing __metadata in output:\n%s", output)
+			}
+
+			t.Logf("%s output (%d bytes):\n%s", name, len(data), output)
+		})
 	}
 }
 

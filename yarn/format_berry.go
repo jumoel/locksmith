@@ -99,9 +99,11 @@ type berryConfig struct {
 	IncludeRoot        bool   // true for yarn berry (adds workspace root entry)
 	SkipChecksum       bool   // v4/v5: omit checksums (yarn 2/3.1 computes cache-specific hashes)
 	RootDepsNpmPrefix  bool   // v8: root deps use "npm:constraint" format
+	ProjectName        string // for portal: locator suffix on file: deps
 }
 
 func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec, cfg berryConfig) ([]byte, error) {
+	cfg.ProjectName = project.Name
 	// Build entries: group constraints by resolved "name@version".
 	// In a flat resolution, each constraint on a given package name resolves to
 	// the same version, so we collect all constraints that point to each package.
@@ -156,7 +158,7 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 			sortKey: e.constraints[0],
 			write: func(b *strings.Builder) {
 				writeEntryKey(b, e.constraints)
-				writeEntryBody(b, e.pkg, e.constraints[0], cfg.ChecksumPrefix, cfg.SkipChecksum)
+				writeEntryBody(b, e.pkg, e.constraints[0], cfg)
 			},
 		})
 	}
@@ -298,12 +300,24 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 			if edge.Type == ecosystem.DepPeer {
 				continue
 			}
-			// For non-registry deps, use edge.Name (dep alias) + constraint as the key
-			// to match the Packages map (which stores git deps under depName@constraint).
+			// Compute targetKey to match the Packages map key.
+			// The resolve engine stores non-registry deps under
+			// "actualName@constraint" where actualName is the resolved package
+			// name (not the dep alias). Tarball URL deps that resolved to a
+			// real npm package are stored under "name@version".
 			constraint := edge.Constraint
 			var targetKey string
 			if isNonRegistryBerryConstraint(constraint) {
-				targetKey = edge.Name + "@" + constraint
+				if isNpmRegistryURL(constraint) {
+					// Tarball URL pointing at a known registry: the resolve engine
+					// resolved it to a real npm package stored under name@version.
+					targetKey = edge.Target.Name + "@" + edge.Target.Version
+				} else {
+					// Git, file, or other non-registry dep: stored under
+					// actualName@constraint (actualName may differ from edge.Name
+					// when the dep is aliased, e.g. "git-pkg" -> "is-odd").
+					targetKey = edge.Target.Name + "@" + constraint
+				}
 			} else {
 				targetKey = edge.Target.Name + "@" + edge.Target.Version
 			}
@@ -440,7 +454,7 @@ func writeEntryKey(b *strings.Builder, constraints []string) {
 }
 
 // writeEntryBody writes the indented fields for a single package entry.
-func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, constraintKey string, checksumPrefix string, skipChecksum bool) {
+func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, constraintKey string, cfg berryConfig) {
 	node := pkg.Node
 
 	b.WriteString(fmt.Sprintf("  version: %s\n", node.Version))
@@ -453,21 +467,31 @@ func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, constraintKey stri
 		depName = constraintKey[:atIdx]
 	}
 
-	// Resolution varies by dep type.
+	// Determine resolution and linkType based on dep type.
+	linkType := "hard"
 	url := node.TarballURL
 	if strings.HasPrefix(url, "git+ssh://") || strings.HasPrefix(url, "git+https://") {
-		// Git dep: use dep name + HTTPS URL with commit hash.
+		// Git dep: convert to HTTPS URL with #commit= hash format.
 		cleanURL := strings.TrimPrefix(url, "git+ssh://git@github.com/")
 		cleanURL = strings.TrimPrefix(cleanURL, "git+https://github.com/")
 		cleanURL = "https://github.com/" + cleanURL
 		cleanURL = strings.Replace(cleanURL, "#", "#commit=", 1)
 		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", depName, cleanURL))
 	} else if strings.HasPrefix(url, "file:") {
-		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", depName, url))
+		// file: dep: use portal: protocol with locator suffix.
+		path := strings.TrimPrefix(url, "file:")
+		locator := strings.NewReplacer("@", "%40", ":", "%3A").Replace(cfg.ProjectName) + "%40workspace%3A."
+		b.WriteString(fmt.Sprintf("  resolution: \"%s@portal:%s::locator=%s\"\n", depName, path, locator))
+		linkType = "soft"
+	} else if isNpmRegistryURL(url) {
+		// Tarball URL pointing at npm/yarn registry: this resolved to a known
+		// npm package, so use standard npm resolution.
+		b.WriteString(fmt.Sprintf("  resolution: \"%s@npm:%s\"\n", node.Name, node.Version))
 	} else if strings.HasPrefix(url, "https://") && strings.HasSuffix(url, ".tgz") {
-		// Tarball URL dep: use dep name + URL.
+		// Non-registry tarball URL: use dep name + URL.
 		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", depName, url))
 	} else {
+		// Default: standard npm resolution.
 		b.WriteString(fmt.Sprintf("  resolution: \"%s@npm:%s\"\n", node.Name, node.Version))
 	}
 
@@ -491,15 +515,15 @@ func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, constraintKey stri
 	// Checksum: for v6/v8, emit sha512 hex (yarn 3.2+/4 don't validate).
 	// For v4/v5, omit entirely - yarn 2/3.1 compute cache-specific hashes
 	// that can't be derived from registry data. Yarn fills them on install.
-	if !skipChecksum && node.Integrity != "" {
-		checksum := integrityToYarnChecksum(node.Integrity, checksumPrefix)
+	if !cfg.SkipChecksum && node.Integrity != "" {
+		checksum := integrityToYarnChecksum(node.Integrity, cfg.ChecksumPrefix)
 		if checksum != "" {
 			b.WriteString(fmt.Sprintf("  checksum: %s\n", checksum))
 		}
 	}
 
 	b.WriteString("  languageName: node\n")
-	b.WriteString("  linkType: hard\n")
+	b.WriteString(fmt.Sprintf("  linkType: %s\n", linkType))
 }
 
 // findConstraint looks up the original constraint for a dependency by name
