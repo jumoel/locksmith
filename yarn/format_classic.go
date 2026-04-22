@@ -71,10 +71,16 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 		return edge.Target.Name + "@" + edge.Target.Version
 	}
 
+	wsNames := workspaceMemberNamesYarn(project)
+
 	// Walk root edges.
 	if result.Graph != nil && result.Graph.Root != nil {
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target == nil {
+				continue
+			}
+			// Skip workspace member edges.
+			if strings.HasPrefix(edge.Constraint, "workspace:") {
 				continue
 			}
 			key := classicEdgeKey(edge)
@@ -82,6 +88,27 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 				name:       edge.Name,
 				constraint: edge.Constraint,
 			})
+		}
+
+		// Walk workspace member node edges to collect constraints for their deps.
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target == nil || !strings.HasPrefix(edge.Constraint, "workspace:") {
+				continue
+			}
+			for _, depEdge := range edge.Target.Dependencies {
+				if depEdge.Target == nil {
+					continue
+				}
+				// Skip edges to other workspace members.
+				if wsNames[depEdge.Target.Name] {
+					continue
+				}
+				key := classicEdgeKey(depEdge)
+				versionConstraints[key] = append(versionConstraints[key], constraintInfo{
+					name:       depEdge.Name,
+					constraint: depEdge.Constraint,
+				})
+			}
 		}
 	}
 
@@ -145,6 +172,33 @@ func (f *YarnClassicFormatter) FormatFromResult(result *ResolveResult, project *
 			version:      pkg.Node.Version,
 			resolvedURL:  resolvedURLWithShasum(pkg.Node.TarballURL, pkg.Node.Shasum),
 			integrity:    pkg.Node.Integrity,
+			dependencies: depConstraints,
+		}
+	}
+
+	// Add workspace member entries.
+	for _, member := range project.Workspaces {
+		if member.Spec == nil || member.Spec.Name == "" {
+			continue
+		}
+		// Workspace member constraint key: "@scope/name@0.0.0"
+		constraintKey := formatConstraintKey(member.Spec.Name, member.Spec.Version)
+
+		// Build dependencies: only non-workspace registry deps.
+		depConstraints := make(map[string]string)
+		for _, d := range member.Spec.Dependencies {
+			if strings.HasPrefix(d.Constraint, "workspace:") {
+				continue
+			}
+			depConstraints[d.Name] = d.Constraint
+		}
+
+		entries[constraintKey] = &classicEntry{
+			sortKey:      constraintKey,
+			constraints:  []string{constraintKey},
+			version:      member.Spec.Version,
+			resolvedURL:  "",
+			integrity:    "",
 			dependencies: depConstraints,
 		}
 	}

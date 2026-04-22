@@ -3,6 +3,7 @@ package pnpm
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -58,14 +59,16 @@ func (f *PnpmLockV9Formatter) FormatFromResult(result *ResolveResult, project *e
 	importers := &yaml.Node{Kind: yaml.MappingNode}
 	importerDot := buildImporter(project, result)
 	addMapping(importers, ".", importerDot)
+	buildWorkspaceImporters(importers, project, result)
 	addMapping(root, "importers", importers)
 
 	// packages (resolution info only)
-	packagesNode := buildPackages(result)
+	wsNames := workspaceMemberNames(project)
+	packagesNode := buildPackages(result, wsNames)
 	addMapping(root, "packages", packagesNode)
 
 	// snapshots (dependency relationships)
-	snapshotsNode := buildSnapshots(result)
+	snapshotsNode := buildSnapshots(result, wsNames)
 	addMapping(root, "snapshots", snapshotsNode)
 
 	var buf bytes.Buffer
@@ -79,6 +82,133 @@ func (f *PnpmLockV9Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 
 	return buf.Bytes(), nil
+}
+
+// workspaceMemberNames returns the set of package names that are workspace
+// members. Used to filter them out of packages/snapshots sections.
+func workspaceMemberNames(project *ecosystem.ProjectSpec) map[string]bool {
+	names := make(map[string]bool)
+	for _, m := range project.Workspaces {
+		if m.Spec != nil && m.Spec.Name != "" {
+			names[m.Spec.Name] = true
+		}
+	}
+	return names
+}
+
+// buildWorkspaceImporters constructs importer entries for each workspace
+// member and adds them to the importers mapping node.
+func buildWorkspaceImporters(importers *yaml.Node, project *ecosystem.ProjectSpec, result *ResolveResult, v6KeyFormat ...bool) {
+	if len(project.Workspaces) == 0 {
+		return
+	}
+
+	// Build an index from workspace member name to its relative path so we
+	// can compute link: paths between members.
+	memberRelPaths := make(map[string]string)
+	for _, m := range project.Workspaces {
+		if m.Spec != nil {
+			memberRelPaths[m.Spec.Name] = m.RelPath
+		}
+	}
+
+	// Build a lookup from workspace member dep edges. Each workspace member
+	// appears as a root edge with Constraint "workspace:<relpath>".
+	memberNodes := make(map[string]*ecosystem.Node)
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil && strings.HasPrefix(edge.Constraint, "workspace:") {
+				memberNodes[edge.Target.Name] = edge.Target
+			}
+		}
+	}
+
+	for _, member := range project.Workspaces {
+		if member.Spec == nil {
+			continue
+		}
+		memberNode := buildWorkspaceMemberImporter(member, memberNodes, memberRelPaths, result, v6KeyFormat...)
+		// Add the member with its package name as a line comment so the
+		// name appears in the lockfile (matching pnpm's real behavior for
+		// workspace lockfiles).
+		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: member.RelPath}
+		if member.Spec.Name != "" {
+			keyNode.LineComment = member.Spec.Name
+		}
+		importers.Content = append(importers.Content, keyNode, memberNode)
+	}
+}
+
+// buildWorkspaceMemberImporter constructs a single importer entry for a
+// workspace member.
+func buildWorkspaceMemberImporter(member *ecosystem.WorkspaceMember, memberNodes map[string]*ecosystem.Node, memberRelPaths map[string]string, result *ResolveResult, v6KeyFormat ...bool) *yaml.Node {
+	useV6 := len(v6KeyFormat) > 0 && v6KeyFormat[0]
+	node := &yaml.Node{Kind: yaml.MappingNode}
+
+	g := ecosystem.GroupDependenciesByType(member.Spec.Dependencies)
+
+	// Build resolved version lookups from the member's node edges.
+	memberGraphNode := memberNodes[member.Spec.Name]
+	memberVersions := make(map[string]string)
+	memberTargetNames := make(map[string]string)
+	if memberGraphNode != nil {
+		for _, edge := range memberGraphNode.Dependencies {
+			if edge.Target != nil {
+				memberVersions[edge.Name] = edge.Target.Version
+				memberTargetNames[edge.Name] = edge.Target.Name
+			}
+		}
+	}
+
+	// Helper to build importer dep entries for a workspace member.
+	buildMemberDeps := func(deps map[string]string) *yaml.Node {
+		depsNode := &yaml.Node{Kind: yaml.MappingNode}
+		names := maputil.SortedKeys(deps)
+		for _, name := range names {
+			constraint := deps[name]
+			versionValue := memberVersions[name]
+
+			// Check if this is a workspace: dep - use link: relative path.
+			if strings.HasPrefix(constraint, "workspace:") {
+				targetName := memberTargetNames[name]
+				if targetRelPath, ok := memberRelPaths[targetName]; ok {
+					// Compute relative path from this member's dir to the target member's dir.
+					rel, err := filepath.Rel(member.RelPath, targetRelPath)
+					if err == nil {
+						versionValue = "link:" + rel
+					}
+				}
+			} else if targetName := memberTargetNames[name]; targetName != "" && targetName != name {
+				// Alias deps.
+				if useV6 {
+					versionValue = "/" + targetName + "@" + memberVersions[name]
+				} else {
+					versionValue = targetName + "@" + memberVersions[name]
+				}
+			}
+
+			depNode := &yaml.Node{Kind: yaml.MappingNode}
+			addMapping(depNode, "specifier", specifierNode(constraint))
+			addMapping(depNode, "version", scalarNode(versionValue, 0))
+			addMapping(depsNode, name, depNode)
+		}
+		return depsNode
+	}
+
+	if len(g.Regular) > 0 {
+		addMapping(node, "dependencies", buildMemberDeps(g.Regular))
+	}
+	if len(g.Dev) > 0 {
+		addMapping(node, "devDependencies", buildMemberDeps(g.Dev))
+	}
+	if len(g.Optional) > 0 {
+		optNode := buildMemberDeps(g.Optional)
+		if len(optNode.Content) > 0 {
+			addMapping(node, "optionalDependencies", optNode)
+		}
+	}
+
+	return node
 }
 
 // buildImporter constructs the importer entry for the root project (".").
@@ -208,13 +338,18 @@ func pnpmPackageKey(pkg *ResolvedPackage) string {
 }
 
 // buildPackages constructs the packages section with resolution info only.
-func buildPackages(result *ResolveResult) *yaml.Node {
+// wsNames is the set of workspace member package names to exclude.
+func buildPackages(result *ResolveResult, wsNames map[string]bool) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
 	keys := maputil.SortedMapKeys(result.Packages)
 
 	for _, key := range keys {
 		pkg := result.Packages[key]
+		// Skip workspace member packages - they're local, not from the registry.
+		if wsNames[pkg.Node.Name] {
+			continue
+		}
 		pkgNode := &yaml.Node{Kind: yaml.MappingNode}
 
 		// resolution - varies by dep type.
@@ -276,13 +411,18 @@ func buildPackages(result *ResolveResult) *yaml.Node {
 }
 
 // buildSnapshots constructs the snapshots section with dependency relationships.
-func buildSnapshots(result *ResolveResult) *yaml.Node {
+// wsNames is the set of workspace member package names to exclude.
+func buildSnapshots(result *ResolveResult, wsNames map[string]bool) *yaml.Node {
 	node := &yaml.Node{Kind: yaml.MappingNode}
 
 	keys := maputil.SortedMapKeys(result.Packages)
 
 	for _, key := range keys {
 		pkg := result.Packages[key]
+		// Skip workspace member packages.
+		if wsNames[pkg.Node.Name] {
+			continue
+		}
 		snapNode := &yaml.Node{Kind: yaml.MappingNode}
 
 		if len(pkg.Dependencies) > 0 {
@@ -614,11 +754,16 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 
 	// packages section with /name/version keys.
+	wsNamesV5 := workspaceMemberNames(project)
 	packagesNode := &yaml.Node{Kind: yaml.MappingNode}
 	keys := maputil.SortedMapKeys(result.Packages)
 
 	for _, key := range keys {
 		pkg := result.Packages[key]
+		// Skip workspace member packages.
+		if wsNamesV5[pkg.Node.Name] {
+			continue
+		}
 		url := pkg.Node.TarballURL
 		// file: deps are links in v5, skip them from packages section.
 		if strings.HasPrefix(url, "file:") {
@@ -685,8 +830,10 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 	importers := &yaml.Node{Kind: yaml.MappingNode}
 	importerDot := buildImporter(project, result, true)
 	addMapping(importers, ".", importerDot)
+	buildWorkspaceImporters(importers, project, result, true)
 	addMapping(root, "importers", importers)
 
+	wsNames := workspaceMemberNames(project)
 	devFlags := computeDevFlags(result, project)
 
 	// packages section with /name@version keys.
@@ -695,6 +842,10 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 
 	for _, key := range keys {
 		pkg := result.Packages[key]
+		// Skip workspace member packages.
+		if wsNames[pkg.Node.Name] {
+			continue
+		}
 		// Use special keys for non-registry deps, v6 key format for regular.
 		url := pkg.Node.TarballURL
 		var pkgKey string
@@ -827,9 +978,14 @@ func (f *PnpmLockV4Formatter) FormatFromResult(result *ResolveResult, project *e
 		}
 	}
 
+	wsNamesV4 := workspaceMemberNames(project)
 	packagesNode := &yaml.Node{Kind: yaml.MappingNode}
 	for _, key := range maputil.SortedMapKeys(result.Packages) {
 		pkg := result.Packages[key]
+		// Skip workspace member packages.
+		if wsNamesV4[pkg.Node.Name] {
+			continue
+		}
 		url := pkg.Node.TarballURL
 		if strings.HasPrefix(url, "file:") {
 			continue

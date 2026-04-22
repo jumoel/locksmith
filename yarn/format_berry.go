@@ -168,106 +168,24 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 		allEntries = append(allEntries, sortableEntry{
 			sortKey: rootConstraint,
 			write: func(b *strings.Builder) {
-				b.WriteString(fmt.Sprintf("%q:\n", rootConstraint))
-				b.WriteString(fmt.Sprintf("  version: %s\n", "0.0.0-use.local"))
-				b.WriteString(fmt.Sprintf("  resolution: \"%s@workspace:.\"\n", project.Name))
-				// Collect non-peer deps (deduplicated via map).
-				depMap := make(map[string]string)
-				for _, d := range project.Dependencies {
-					if d.Type == ecosystem.DepPeer {
-						continue
-					}
-					depMap[d.Name] = d.Constraint
-				}
-				if len(depMap) > 0 {
-					b.WriteString("  dependencies:\n")
-					depNames := make([]string, 0, len(depMap))
-					for name := range depMap {
-						depNames = append(depNames, name)
-					}
-					sort.Strings(depNames)
-					for _, name := range depNames {
-						yamlName := name
-						if strings.HasPrefix(name, "@") {
-							yamlName = fmt.Sprintf("%q", name)
-						}
-						constraint := depMap[name]
-						if cfg.RootDepsNpmPrefix {
-							// Don't add npm: prefix for non-registry constraints or npm: aliases.
-							if strings.HasPrefix(constraint, "npm:") || isNonRegistryBerryConstraint(constraint) {
-								b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, constraint))
-							} else {
-								b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, constraint))
-							}
-						} else {
-							// Quote values containing YAML special chars.
-							// * is a YAML alias, : is a mapping, bare numbers/bools are types.
-							if strings.ContainsAny(constraint, ":*") || constraint == "true" || constraint == "false" || constraint == "null" {
-								b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, constraint))
-							} else {
-								b.WriteString(fmt.Sprintf("    %s: %s\n", yamlName, constraint))
-							}
-						}
-					}
-				}
-				// dependenciesMeta: mark optional deps.
-				var optDeps []string
-				for _, d := range project.Dependencies {
-					if d.Type == ecosystem.DepOptional {
-						optDeps = append(optDeps, d.Name)
-					}
-				}
-				if len(optDeps) > 0 {
-					sort.Strings(optDeps)
-					b.WriteString("  dependenciesMeta:\n")
-					for _, name := range optDeps {
-						yamlName := name
-						if strings.HasPrefix(name, "@") {
-							yamlName = fmt.Sprintf("%q", name)
-						}
-						b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
-						b.WriteString("      optional: true\n")
-					}
-				}
-				// peerDependencies and peerDependenciesMeta from package.json.
-				g := ecosystem.GroupDependenciesByType(project.Dependencies)
-				if len(g.Peer) > 0 {
-					peerNames := make([]string, 0, len(g.Peer))
-					for name := range g.Peer {
-						peerNames = append(peerNames, name)
-					}
-					sort.Strings(peerNames)
-					b.WriteString("  peerDependencies:\n")
-					for _, name := range peerNames {
-						yamlName := name
-						if strings.HasPrefix(name, "@") {
-							yamlName = fmt.Sprintf("%q", name)
-						}
-						b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, g.Peer[name]))
-					}
-					// peerDependenciesMeta: only mark peers that are actually optional.
-					var optionalPeerNames []string
-					for _, name := range peerNames {
-						if pm, ok := project.PeerDepsMeta[name]; ok && pm.Optional {
-							optionalPeerNames = append(optionalPeerNames, name)
-						}
-					}
-					if len(optionalPeerNames) > 0 {
-						b.WriteString("  peerDependenciesMeta:\n")
-						for _, name := range optionalPeerNames {
-							yamlName := name
-							if strings.HasPrefix(name, "@") {
-								yamlName = fmt.Sprintf("%q", name)
-							}
-							b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
-							b.WriteString("      optional: true\n")
-						}
-					}
-				}
-				b.WriteString("  languageName: unknown\n")
-				b.WriteString("  linkType: soft\n")
+				writeBerryWorkspaceEntry(b, project.Name, ".", project.Dependencies, project.PeerDepsMeta, cfg)
 			},
 		})
+
+		// Add workspace member entries.
+		for _, member := range project.Workspaces {
+			if member.Spec == nil || member.Spec.Name == "" {
+				continue
+			}
+			m := member // capture for closure
+			memberConstraint := fmt.Sprintf("%s@workspace:%s", m.Spec.Name, m.RelPath)
+			allEntries = append(allEntries, sortableEntry{
+				sortKey: memberConstraint,
+				write: func(b *strings.Builder) {
+					writeBerryWorkspaceEntry(b, m.Spec.Name, m.RelPath, m.Spec.Dependencies, m.Spec.PeerDepsMeta, cfg)
+				},
+			})
+		}
 	}
 
 	sort.Slice(allEntries, func(i, j int) bool {
@@ -282,10 +200,130 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 	return []byte(b.String()), nil
 }
 
+// workspaceMemberNamesYarn returns the set of package names that are workspace members.
+func workspaceMemberNamesYarn(project *ecosystem.ProjectSpec) map[string]bool {
+	names := make(map[string]bool)
+	for _, m := range project.Workspaces {
+		if m.Spec != nil && m.Spec.Name != "" {
+			names[m.Spec.Name] = true
+		}
+	}
+	return names
+}
+
+// writeBerryWorkspaceEntry writes a workspace entry (root or member) to the
+// yarn berry lockfile. workspacePath is "." for root or the relative path
+// (e.g., "packages/lib-a") for members.
+func writeBerryWorkspaceEntry(b *strings.Builder, name, workspacePath string, deps []ecosystem.DeclaredDep, peerDepsMeta map[string]ecosystem.PeerDepMeta, cfg berryConfig) {
+	constraint := fmt.Sprintf("%s@workspace:%s", name, workspacePath)
+	b.WriteString(fmt.Sprintf("%q:\n", constraint))
+	b.WriteString(fmt.Sprintf("  version: %s\n", "0.0.0-use.local"))
+	b.WriteString(fmt.Sprintf("  resolution: \"%s@workspace:%s\"\n", name, workspacePath))
+
+	// Collect non-peer deps (deduplicated via map).
+	depMap := make(map[string]string)
+	for _, d := range deps {
+		if d.Type == ecosystem.DepPeer {
+			continue
+		}
+		depMap[d.Name] = d.Constraint
+	}
+	if len(depMap) > 0 {
+		b.WriteString("  dependencies:\n")
+		depNames := make([]string, 0, len(depMap))
+		for n := range depMap {
+			depNames = append(depNames, n)
+		}
+		sort.Strings(depNames)
+		for _, n := range depNames {
+			yamlName := n
+			if strings.HasPrefix(n, "@") {
+				yamlName = fmt.Sprintf("%q", n)
+			}
+			c := depMap[n]
+			if cfg.RootDepsNpmPrefix {
+				// workspace: constraints keep their protocol.
+				if strings.HasPrefix(c, "workspace:") || strings.HasPrefix(c, "npm:") || isNonRegistryBerryConstraint(c) {
+					b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, c))
+				} else {
+					b.WriteString(fmt.Sprintf("    %s: \"npm:%s\"\n", yamlName, c))
+				}
+			} else {
+				if strings.ContainsAny(c, ":*") || c == "true" || c == "false" || c == "null" {
+					b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, c))
+				} else {
+					b.WriteString(fmt.Sprintf("    %s: %s\n", yamlName, c))
+				}
+			}
+		}
+	}
+
+	// dependenciesMeta: mark optional deps.
+	var optDeps []string
+	for _, d := range deps {
+		if d.Type == ecosystem.DepOptional {
+			optDeps = append(optDeps, d.Name)
+		}
+	}
+	if len(optDeps) > 0 {
+		sort.Strings(optDeps)
+		b.WriteString("  dependenciesMeta:\n")
+		for _, n := range optDeps {
+			yamlName := n
+			if strings.HasPrefix(n, "@") {
+				yamlName = fmt.Sprintf("%q", n)
+			}
+			b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
+			b.WriteString("      optional: true\n")
+		}
+	}
+
+	// peerDependencies and peerDependenciesMeta.
+	g := ecosystem.GroupDependenciesByType(deps)
+	if len(g.Peer) > 0 {
+		peerNames := make([]string, 0, len(g.Peer))
+		for n := range g.Peer {
+			peerNames = append(peerNames, n)
+		}
+		sort.Strings(peerNames)
+		b.WriteString("  peerDependencies:\n")
+		for _, n := range peerNames {
+			yamlName := n
+			if strings.HasPrefix(n, "@") {
+				yamlName = fmt.Sprintf("%q", n)
+			}
+			b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, g.Peer[n]))
+		}
+		if peerDepsMeta != nil {
+			var optionalPeerNames []string
+			for _, n := range peerNames {
+				if pm, ok := peerDepsMeta[n]; ok && pm.Optional {
+					optionalPeerNames = append(optionalPeerNames, n)
+				}
+			}
+			if len(optionalPeerNames) > 0 {
+				b.WriteString("  peerDependenciesMeta:\n")
+				for _, n := range optionalPeerNames {
+					yamlName := n
+					if strings.HasPrefix(n, "@") {
+						yamlName = fmt.Sprintf("%q", n)
+					}
+					b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
+					b.WriteString("      optional: true\n")
+				}
+			}
+		}
+	}
+
+	b.WriteString("  languageName: unknown\n")
+	b.WriteString("  linkType: soft\n")
+}
+
 // buildConstraintMap collects all "name@npm:constraint" strings that resolve
 // to each "name@version" key in the result.
 func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) map[string][]string {
 	m := make(map[string][]string)
+	wsNames := workspaceMemberNamesYarn(project)
 
 	// Constraints from the root project's declared dependencies.
 	// Use root graph edges to find the exact resolved version for each dep,
@@ -298,6 +336,10 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 			// Skip peer dep edges from root - yarn berry doesn't include
 			// optional peer deps in the lockfile.
 			if edge.Type == ecosystem.DepPeer {
+				continue
+			}
+			// Skip workspace member edges - they get their own workspace entries.
+			if strings.HasPrefix(edge.Constraint, "workspace:") {
 				continue
 			}
 			// Compute targetKey to match the Packages map key.
@@ -330,6 +372,27 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 				m[targetKey] = appendUnique(m[targetKey], descriptor)
 			} else {
 				descriptor := fmt.Sprintf("%s@npm:%s", edge.Name, constraint)
+				m[targetKey] = appendUnique(m[targetKey], descriptor)
+			}
+		}
+
+		// Constraints from workspace member dependencies.
+		// Workspace members are not in result.Packages (no OnNodeResolved call),
+		// so we must walk their graph nodes to collect constraints for their deps.
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target == nil || !strings.HasPrefix(edge.Constraint, "workspace:") {
+				continue
+			}
+			for _, depEdge := range edge.Target.Dependencies {
+				if depEdge.Target == nil {
+					continue
+				}
+				// Skip edges to other workspace members.
+				if wsNames[depEdge.Target.Name] {
+					continue
+				}
+				targetKey := depEdge.Target.Name + "@" + depEdge.Target.Version
+				descriptor := fmt.Sprintf("%s@npm:%s", depEdge.Name, depEdge.Constraint)
 				m[targetKey] = appendUnique(m[targetKey], descriptor)
 			}
 		}

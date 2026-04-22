@@ -30,7 +30,16 @@ func (f *BunLockFormatter) FormatFromResult(result *ResolveResult, project *ecos
 		{Key: "", Value: workspaceDeps},
 	}
 
-	packages := buildPackagesFromGraph(result)
+	// Add workspace member entries.
+	for _, member := range project.Workspaces {
+		if member.Spec == nil {
+			continue
+		}
+		memberDeps := buildWorkspaceDeps(member.Spec)
+		workspaces = append(workspaces, orderedjson.Entry{Key: member.RelPath, Value: memberDeps})
+	}
+
+	packages := buildPackagesFromGraph(result, project)
 
 	lockfile := orderedjson.Map{
 		{Key: "lockfileVersion", Value: 1},
@@ -144,6 +153,17 @@ func buildNonRegistryPackageEntry(node *ecosystem.Node, declaredName, originalCo
 	}
 }
 
+// workspaceMemberNamesBun returns the set of package names that are workspace members.
+func workspaceMemberNamesBun(project *ecosystem.ProjectSpec) map[string]bool {
+	names := make(map[string]bool)
+	for _, m := range project.Workspaces {
+		if m.Spec != nil && m.Spec.Name != "" {
+			names[m.Spec.Name] = true
+		}
+	}
+	return names
+}
+
 // buildPackagesFromGraph walks the dependency graph to build bun.lock's
 // packages section using hierarchical path keys.
 //
@@ -151,7 +171,8 @@ func buildNonRegistryPackageEntry(node *ecosystem.Node, declaredName, originalCo
 // When multiple versions of a package exist, the root-level version gets
 // the bare name key, and nested versions get path keys like "parent/name"
 // reflecting the dependency chain that leads to them.
-func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
+func buildPackagesFromGraph(result *ResolveResult, project *ecosystem.ProjectSpec) orderedjson.Map {
+	wsNames := workspaceMemberNamesBun(project)
 	// Build alias map: when a root dependency's declared name differs from
 	// the resolved package name (npm aliases, git deps), bun expects the
 	// declared name as the package key.
@@ -180,9 +201,13 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 	}
 
 	// First pass: find which names have multiple versions.
+	// Skip workspace member packages - they're local, not from the registry.
 	byName := make(map[string]map[string]*ResolvedPackage) // name -> version -> pkg
 	for _, pkg := range result.Packages {
 		name := pkg.Node.Name
+		if wsNames[name] {
+			continue
+		}
 		if byName[name] == nil {
 			byName[name] = make(map[string]*ResolvedPackage)
 		}
