@@ -379,8 +379,9 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	// packages are included with os/cpu metadata; bun filters at install time.
 	// So we skip applyPlatformFilter() here, unlike npm/pnpm/yarn.
 
-	// Remove packages only reachable via peer dep edges from root.
-	// Bun doesn't auto-install optional peers.
+	// Remove packages that are ONLY reachable as peer deps from root and
+	// are not depended on by any other package in the graph. Bun doesn't
+	// auto-install optional peers that nothing else needs.
 	if result.Graph != nil && result.Graph.Root != nil {
 		peerOnlyKeys := make(map[string]bool)
 		nonPeerKeys := make(map[string]bool)
@@ -395,8 +396,32 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 				nonPeerKeys[key] = true
 			}
 		}
+		// Check if any non-root package needs the peer-only package.
+		// This includes both regular dependencies AND peer dependencies
+		// declared by installed packages (e.g., react-dom peers on react).
+		needed := make(map[string]bool)
+		for _, pkg := range result.Packages {
+			for _, dep := range pkg.Dependencies {
+				depKey := dep.ResolvedName + "@" + dep.ResolvedVersion
+				needed[depKey] = true
+			}
+			// Also check peer deps - if a non-peer-only package peers on
+			// a package, that package is needed in the lockfile.
+			for peerName := range pkg.PeerDeps {
+				// Find the resolved version of this peer dep.
+				if node, ok := result.Graph.Nodes[peerName]; ok {
+					needed[peerName+"@"+node.Version] = true
+				}
+				// Also check by iterating graph nodes for name match.
+				for nodeKey, node := range result.Graph.Nodes {
+					if node.Name == peerName {
+						needed[nodeKey] = true
+					}
+				}
+			}
+		}
 		for key := range peerOnlyKeys {
-			if !nonPeerKeys[key] {
+			if !nonPeerKeys[key] && !needed[key] {
 				delete(result.Packages, key)
 			}
 		}
