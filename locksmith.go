@@ -323,22 +323,9 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
 	}
 
-	removed, err := applyPlatformFilter(result.Graph, opts.Platform)
-	if err != nil {
-		return nil, fmt.Errorf("filtering by platform: %w", err)
-	}
-	for key := range removed {
-		delete(result.Packages, key)
-	}
-	// Also clean dep references within remaining bun packages.
-	for _, pkg := range result.Packages {
-		for depName, dep := range pkg.Dependencies {
-			depKey := dep.ResolvedName + "@" + dep.ResolvedVersion
-			if removed[depKey] {
-				delete(pkg.Dependencies, depName)
-			}
-		}
-	}
+	// Note: bun lockfiles are platform-independent. All platform-specific
+	// packages are included with os/cpu metadata; bun filters at install time.
+	// So we skip applyPlatformFilter() here, unlike npm/pnpm/yarn.
 
 	// Remove packages only reachable via peer dep edges from root.
 	// Bun doesn't auto-install optional peers.

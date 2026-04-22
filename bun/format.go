@@ -286,10 +286,13 @@ func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 
 	// optionalPeers lists peer deps that are optional (from peerDependenciesMeta).
 	// Bun requires this to know which peer deps can be skipped.
+	// Only include peers that are also declared in peerDependencies - some
+	// packages have peerDependenciesMeta entries without a matching
+	// peerDependencies entry (e.g., styled-jsx).
 	if len(pkg.PeerDepsMeta) > 0 {
 		var optionalPeers []string
 		for name, meta := range pkg.PeerDepsMeta {
-			if meta.Optional {
+			if meta.Optional && pkg.PeerDeps[name] != "" {
 				optionalPeers = append(optionalPeers, name)
 			}
 		}
@@ -307,12 +310,53 @@ func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 		})
 	}
 
+	// os/cpu metadata tells bun which platform a package targets.
+	// Bun uses a single string when there's one value, array otherwise.
+	if len(node.OS) > 0 {
+		metadata = append(metadata, orderedjson.Entry{Key: "os", Value: singleOrSlice(node.OS)})
+	}
+	if len(node.CPU) > 0 {
+		metadata = append(metadata, orderedjson.Entry{Key: "cpu", Value: singleOrSlice(normalizeBunCPU(node.CPU))})
+	}
+
 	return []interface{}{
 		resolvedSpec,
 		"",
 		metadata,
 		node.Integrity,
 	}
+}
+
+// singleOrSlice returns the single string if the slice has one element,
+// or the full slice otherwise. Bun uses scalar values for single-element
+// os/cpu arrays in bun.lock.
+func singleOrSlice(s []string) interface{} {
+	if len(s) == 1 {
+		return s[0]
+	}
+	return s
+}
+
+// bunKnownCPU is the set of CPU architectures bun recognizes.
+// Unknown values are normalized to "none" in bun.lock.
+var bunKnownCPU = map[string]bool{
+	"x64": true, "arm64": true, "arm": true,
+	"ia32": true, "ppc64": true, "s390x": true,
+	"none": true,
+}
+
+// normalizeBunCPU maps CPU values to what bun expects. Unrecognized
+// architectures (e.g., riscv64, wasm32) become "none".
+func normalizeBunCPU(cpus []string) []string {
+	out := make([]string, len(cpus))
+	for i, c := range cpus {
+		if bunKnownCPU[c] {
+			out[i] = c
+		} else {
+			out[i] = "none"
+		}
+	}
+	return out
 }
 
 // addTrailingCommas converts strict JSON to JSONC by adding trailing commas
