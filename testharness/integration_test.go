@@ -179,22 +179,25 @@ func TestIntegration(t *testing.T) {
 							}
 						}
 					}
-					// Skip workspace fixtures for PM versions that don't support workspaces
-					// or don't understand the workspace: protocol in package.json.
+					// Skip workspace fixtures based on PM workspace: protocol support.
+					// The fixtures use pnpm/berry-style workspace: protocol in member
+					// package.json files. PMs that don't understand this protocol will
+					// reject the package.json during install regardless of lockfile content.
 					if strings.HasPrefix(fixture, "workspace-") {
-						if vc.PMName == "npm" && (vc.PMVersion == "2" || vc.PMVersion == "5" || vc.PMVersion == "6") {
-							t.Skip("npm 2-6 don't support workspaces")
+						// npm doesn't support workspace: protocol in package.json deps.
+						// npm workspaces use regular version ranges resolved via the
+						// workspaces field - a different mechanism.
+						if vc.PMName == "npm" {
+							t.Skip("npm doesn't support workspace: protocol in package.json")
 						}
 						if vc.PMName == "pnpm" && vc.PMVersion == "4" {
 							t.Skip("pnpm 4 doesn't support workspaces")
 						}
-						// yarn classic (v1) doesn't understand the workspace: protocol
-						// in package.json. It uses workspaces field for resolution but
-						// expects regular version ranges for cross-workspace deps.
+						// yarn classic (v1) doesn't understand workspace: protocol.
 						if vc.PMName == "yarn" && vc.PMVersion == "1" {
-							t.Skip("yarn classic doesn't support workspace: protocol in package.json")
+							t.Skip("yarn classic doesn't support workspace: protocol")
 						}
-						// yarn 2 doesn't support workspace:^ protocol (only workspace:*).
+						// yarn 2 doesn't support workspace:^ (only workspace:*).
 						if vc.PMName == "yarn" && vc.PMVersion == "2" && fixture == "workspace-cross-deps" {
 							t.Skip("yarn 2 doesn't support workspace:^ protocol")
 						}
