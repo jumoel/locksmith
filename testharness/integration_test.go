@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jumoel/locksmith"
+	"github.com/jumoel/locksmith/npm"
 )
 
 const dockerImage = "locksmith-test-runner"
@@ -131,7 +132,7 @@ func TestIntegration(t *testing.T) {
 					// Skip specific PM version crashes and unfixable PM-specific behaviors.
 					if vc.PMName == "bun" {
 						bunSkips := map[string]string{
-							"zero-deps":        "bun deletes lockfile for empty projects",
+							"zero-deps":         "bun deletes lockfile for empty projects",
 							"non-registry-deps": "fixture has git+ssh:// deps that require SSH keys in Docker; formatter supports non-registry deps",
 						}
 						if reason, ok := bunSkips[fixture]; ok {
@@ -154,34 +155,40 @@ func TestIntegration(t *testing.T) {
 							t.Skip("npm 2 crashes with ENOTDIR on complex dep trees")
 						}
 					}
-					// Yarn berry non-registry git deps need separate entries with
-					// git-specific resolution format. TODO: implement berry git dep entries.
+					// Yarn berry non-registry git deps: the fixture has git+ssh:// deps
+					// requiring SSH keys unavailable in Docker.
 					if fixture == "non-registry-deps" && vc.PMName == "yarn" && vc.PMVersion != "1" {
-						t.Skip("yarn berry git dep entry format not yet implemented")
+						t.Skip("yarn berry non-registry-deps fixture requires SSH keys for git+ssh:// deps")
 					}
 					// Yarn berry applies internal patches to typescript and resolve packages.
-					// These patches come from yarn's built-in plugin database and differ by version.
-					// See: https://github.com/yarnpkg/berry/tree/master/packages/plugin-compat
 					if vc.PMName == "yarn" && vc.PMVersion != "1" {
 						yarnPatchFixtures := map[string]bool{
 							"typescript-4": true, "typescript-5": true,
-							"mixed-large": true, // contains typescript
+							"mixed-large": true,
 						}
 						if yarnPatchFixtures[fixture] {
 							t.Skip("yarn berry applies internal patches to typescript (plugin-compat)")
 						}
-						// Yarn v6/v8 also patches resolve and adds @types/* auto-types.
 						if vc.PMVersion == "3" || vc.PMVersion == "4" {
 							yarnV6V8Patches := map[string]bool{
-								"multiple-peer-providers": true, // resolve gets patched
-								"npm-6":                  true, // @types/* auto-types
+								"multiple-peer-providers": true,
+								"npm-6":                  true,
 							}
 							if yarnV6V8Patches[fixture] {
 								t.Skip("yarn v6/v8 patches resolve and adds @types/* auto-types")
 							}
 						}
 					}
-							t.Parallel()
+					// Skip workspace fixtures for PM versions that don't support workspaces.
+					if strings.HasPrefix(fixture, "workspace-") {
+						if vc.PMName == "npm" && (vc.PMVersion == "2" || vc.PMVersion == "5" || vc.PMVersion == "6") {
+							t.Skip("npm 2-6 don't support workspaces")
+						}
+						if vc.PMName == "pnpm" && vc.PMVersion == "4" {
+							t.Skip("pnpm 4 doesn't support workspaces")
+						}
+					}
+					t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion
 					t.Run(pmTag, func(t *testing.T) {
 						runVerification(t, vc, fixture)
@@ -216,20 +223,27 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 	t.Helper()
 
 	// Read fixture.
-	specData, err := os.ReadFile(filepath.Join("fixtures", fixture, "package.json"))
+	fixtureDir := filepath.Join("fixtures", fixture)
+	specData, err := os.ReadFile(filepath.Join(fixtureDir, "package.json"))
 	if err != nil {
 		t.Fatalf("reading fixture %s: %v", fixture, err)
 	}
 
 	// Generate lockfile targeting the Docker runner's platform (linux/x64).
 	ctx := context.Background()
-	fixtureDir := filepath.Join("fixtures", fixture)
-	result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
+	opts := locksmith.GenerateOptions{
 		SpecFile:     specData,
 		OutputFormat: vc.Format,
 		Platform:     "linux/x64",
 		SpecDir:      fixtureDir,
-	})
+	}
+
+	// Detect workspace fixtures and pass workspace members.
+	if members := discoverWorkspaceMembersInteg(t, fixtureDir, specData); len(members) > 0 {
+		opts.WorkspaceMembers = members
+	}
+
+	result, err := locksmith.Generate(ctx, opts)
 	if err != nil {
 		t.Fatalf("Generate(%s, %s) failed: %v", vc.Format, fixture, err)
 	}
@@ -334,4 +348,32 @@ func setupYarnBerry(t *testing.T, dir string) {
 	if err := os.WriteFile(filepath.Join(dir, ".yarnrc.yml"), yarnrc, 0o644); err != nil {
 		t.Fatalf("writing .yarnrc.yml: %v", err)
 	}
+}
+
+// discoverWorkspaceMembersInteg detects workspace globs in a package.json and reads
+// member spec files. Returns nil if the fixture is not a workspace project.
+func discoverWorkspaceMembersInteg(t *testing.T, fixtureDir string, specData []byte) map[string][]byte {
+	t.Helper()
+	globs, err := npm.ParseWorkspaceGlobs(specData)
+	if err != nil || len(globs) == 0 {
+		return nil
+	}
+	members := make(map[string][]byte)
+	for _, glob := range globs {
+		pattern := filepath.Join(fixtureDir, glob)
+		matches, _ := filepath.Glob(pattern)
+		for _, match := range matches {
+			pkgPath := filepath.Join(match, "package.json")
+			data, err := os.ReadFile(pkgPath)
+			if err != nil {
+				continue
+			}
+			relPath, _ := filepath.Rel(fixtureDir, match)
+			members[relPath] = data
+		}
+	}
+	if len(members) == 0 {
+		return nil
+	}
+	return members
 }

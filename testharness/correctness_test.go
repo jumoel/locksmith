@@ -14,6 +14,7 @@ import (
 
 	"github.com/jumoel/locksmith"
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/npm"
 )
 
 // correctnessCase defines a locksmith format paired with the real package manager
@@ -214,11 +215,19 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 
 	// Step 1: Generate with locksmith using the PM-version-specific policy.
 	ctx := context.Background()
-	result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
+	opts := locksmith.GenerateOptions{
 		SpecFile:       specData,
 		OutputFormat:   cc.Format,
 		PolicyOverride: cc.PolicyOverride,
-	})
+		SpecDir:        filepath.Join("fixtures", fixture),
+	}
+
+	// Detect workspace fixtures and pass workspace members.
+	if members := discoverWorkspaceMembersCorrectness(t, filepath.Join("fixtures", fixture), specData); len(members) > 0 {
+		opts.WorkspaceMembers = members
+	}
+
+	result, err := locksmith.Generate(ctx, opts)
 	if err != nil {
 		t.Fatalf("locksmith Generate failed: %v", err)
 	}
@@ -581,4 +590,32 @@ func versionDiff(locksmith, real []string) string {
 		return "(same packages, different count)"
 	}
 	return strings.Join(lines, "\n")
+}
+
+// discoverWorkspaceMembersCorrectness detects workspace globs in a package.json
+// and reads member spec files. Returns nil if not a workspace project.
+func discoverWorkspaceMembersCorrectness(t *testing.T, fixtureDir string, specData []byte) map[string][]byte {
+	t.Helper()
+	globs, err := npm.ParseWorkspaceGlobs(specData)
+	if err != nil || len(globs) == 0 {
+		return nil
+	}
+	members := make(map[string][]byte)
+	for _, glob := range globs {
+		pattern := filepath.Join(fixtureDir, glob)
+		matches, _ := filepath.Glob(pattern)
+		for _, match := range matches {
+			pkgPath := filepath.Join(match, "package.json")
+			data, err := os.ReadFile(pkgPath)
+			if err != nil {
+				continue
+			}
+			relPath, _ := filepath.Rel(fixtureDir, match)
+			members[relPath] = data
+		}
+	}
+	if len(members) == 0 {
+		return nil
+	}
+	return members
 }
