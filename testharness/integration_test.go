@@ -194,6 +194,10 @@ func TestIntegration(t *testing.T) {
 						if vc.PMName == "yarn" && vc.PMVersion == "1" {
 							t.Skip("yarn classic doesn't support workspace: protocol in package.json")
 						}
+						// yarn 2 doesn't support workspace:^ protocol (only workspace:*).
+						if vc.PMName == "yarn" && vc.PMVersion == "2" && fixture == "workspace-cross-deps" {
+							t.Skip("yarn 2 doesn't support workspace:^ protocol")
+						}
 					}
 					t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion
