@@ -19,7 +19,8 @@ type packageJSON struct {
 	PeerDependenciesMeta map[string]struct {
 		Optional bool `json:"optional"`
 	} `json:"peerDependenciesMeta,omitempty"`
-	Overrides json.RawMessage `json:"overrides,omitempty"`
+	Overrides  json.RawMessage `json:"overrides,omitempty"`
+	Workspaces json.RawMessage `json:"workspaces,omitempty"`
 }
 
 // SpecParser parses package.json files.
@@ -95,4 +96,69 @@ func sortDeps(deps []ecosystem.DeclaredDep) {
 		}
 		return deps[i].Type < deps[j].Type
 	})
+}
+
+// ParseWorkspaceGlobs extracts workspace globs from a raw package.json.
+// Returns nil if no workspaces field is present.
+func ParseWorkspaceGlobs(data []byte) ([]string, error) {
+	var pkg struct {
+		Workspaces json.RawMessage `json:"workspaces,omitempty"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return nil, err
+	}
+	if pkg.Workspaces == nil {
+		return nil, nil
+	}
+
+	// Try array form first: ["packages/*"]
+	var globs []string
+	if err := json.Unmarshal(pkg.Workspaces, &globs); err == nil {
+		return globs, nil
+	}
+
+	// Try object form: {"packages": ["packages/*"]}
+	var obj struct {
+		Packages []string `json:"packages"`
+	}
+	if err := json.Unmarshal(pkg.Workspaces, &obj); err == nil {
+		return obj.Packages, nil
+	}
+
+	return nil, nil
+}
+
+// ParseWithWorkspaces parses a root spec and workspace member specs.
+// memberData maps relative paths to raw package.json contents.
+func (p *SpecParser) ParseWithWorkspaces(rootData []byte, memberData map[string][]byte) (*ecosystem.ProjectSpec, error) {
+	spec, err := p.Parse(rootData)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(memberData) == 0 {
+		return spec, nil
+	}
+
+	spec.Workspaces = make([]*ecosystem.WorkspaceMember, 0, len(memberData))
+	// Sort keys for deterministic order
+	paths := make([]string, 0, len(memberData))
+	for p := range memberData {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	for _, relPath := range paths {
+		data := memberData[relPath]
+		memberSpec, err := p.Parse(data)
+		if err != nil {
+			return nil, fmt.Errorf("parsing workspace member %s: %w", relPath, err)
+		}
+		spec.Workspaces = append(spec.Workspaces, &ecosystem.WorkspaceMember{
+			RelPath: relPath,
+			Spec:    memberSpec,
+		})
+	}
+
+	return spec, nil
 }

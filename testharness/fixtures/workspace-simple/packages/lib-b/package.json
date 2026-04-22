@@ -1,0 +1,8 @@
+{
+  "name": "@workspace/lib-b",
+  "version": "1.0.0",
+  "dependencies": {
+    "@workspace/lib-a": "workspace:*",
+    "is-number": "^7.0.0"
+  }
+}

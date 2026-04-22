@@ -1,0 +1,7 @@
+{
+  "name": "@workspace/lib-a",
+  "version": "1.0.0",
+  "dependencies": {
+    "ms": "^2.1.0"
+  }
+}

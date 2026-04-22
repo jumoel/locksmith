@@ -80,4 +80,9 @@ type GenerateOptions struct {
 	// resolve file: dependencies by reading the local package's version.
 	// If empty, file: deps get a placeholder version.
 	SpecDir string
+
+	// WorkspaceMembers provides the spec files for workspace members.
+	// Each entry maps a relative path (e.g., "packages/foo") to its raw spec file contents.
+	// If nil or empty, locksmith operates in single-package mode.
+	WorkspaceMembers map[string][]byte
 }

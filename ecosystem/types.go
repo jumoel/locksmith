@@ -54,6 +54,14 @@ type Edge struct {
 	Type       DepType
 }
 
+// WorkspaceMember represents a single package within a workspace.
+type WorkspaceMember struct {
+	// RelPath is the workspace member's relative path from the root (e.g., "packages/foo").
+	RelPath string
+	// Spec is the parsed package.json for this workspace member.
+	Spec *ProjectSpec
+}
+
 // ProjectSpec represents the declared dependencies of a project.
 type ProjectSpec struct {
 	Name         string
@@ -62,6 +70,9 @@ type ProjectSpec struct {
 	// PeerDepsMeta holds metadata about peer dependencies (e.g., optional flag)
 	// as declared in the project's package.json peerDependenciesMeta field.
 	PeerDepsMeta map[string]PeerDepMeta
+	// Workspaces holds workspace members for monorepo projects.
+	// Nil for single-package projects.
+	Workspaces []*WorkspaceMember
 }
 
 // DeclaredDep is a dependency declared in a spec file.
