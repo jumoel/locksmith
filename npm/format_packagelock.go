@@ -46,16 +46,36 @@ func (f *PackageLockV3Formatter) FormatFromResult(result *ResolveResult, project
 				{Key: "name", Value: placed.Node.Name},
 				{Key: "version", Value: placed.Node.Version},
 			}
-			// Include the workspace member's dependencies.
+			// Include the workspace member's dependencies. Resolve workspace:
+			// constraints to the target member's actual version.
 			if project != nil {
+				wsVersions := make(map[string]string)
+				for _, ws := range project.Workspaces {
+					if ws.Spec != nil {
+						wsVersions[ws.Spec.Name] = ws.Spec.Version
+					}
+				}
 				for _, ws := range project.Workspaces {
 					if ws.Spec != nil && ws.Spec.Name == placed.Node.Name {
 						g := ecosystem.GroupDependenciesByType(ws.Spec.Dependencies)
+						resolveWsDeps := func(deps map[string]string) map[string]string {
+							out := make(map[string]string, len(deps))
+							for name, c := range deps {
+								if strings.HasPrefix(c, "workspace:") {
+									if v, ok := wsVersions[name]; ok {
+										out[name] = v
+									}
+								} else {
+									out[name] = c
+								}
+							}
+							return out
+						}
 						if len(g.Regular) > 0 {
-							wsEntry = append(wsEntry, orderedjson.Entry{Key: "dependencies", Value: orderedjson.FromStringMap(g.Regular)})
+							wsEntry = append(wsEntry, orderedjson.Entry{Key: "dependencies", Value: orderedjson.FromStringMap(resolveWsDeps(g.Regular))})
 						}
 						if len(g.Dev) > 0 {
-							wsEntry = append(wsEntry, orderedjson.Entry{Key: "devDependencies", Value: orderedjson.FromStringMap(g.Dev)})
+							wsEntry = append(wsEntry, orderedjson.Entry{Key: "devDependencies", Value: orderedjson.FromStringMap(resolveWsDeps(g.Dev))})
 						}
 						break
 					}
