@@ -337,6 +337,10 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		Funding:          meta.Funding,
 	}
 
+	if len(meta.BundleDeps) > 0 {
+		node.BundleDeps = meta.BundleDeps
+	}
+
 	if s.policy.StorePeerMetaOnNode {
 		node.PeerDeps = meta.PeerDeps
 		node.PeerDepsMeta = meta.PeerDepsMeta

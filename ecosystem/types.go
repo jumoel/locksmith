@@ -41,6 +41,9 @@ type Node struct {
 	// Funding holds funding information for the package.
 	// Can be a URL string or a structured object (stored as raw JSON).
 	Funding interface{}
+	// BundleDeps lists packages declared in bundleDependencies.
+	// When non-empty, bun nests all transitive deps under this package's key.
+	BundleDeps map[string]bool
 }
 
 // Edge represents a dependency relationship.

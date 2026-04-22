@@ -32,6 +32,7 @@ type VersionMetadata struct {
 	License          string
 	Deprecated       string
 	Funding          interface{} // URL string or structured object
+	BundleDeps       map[string]bool // packages declared in bundleDependencies
 }
 
 // PeerDepMeta holds metadata about a peer dependency.

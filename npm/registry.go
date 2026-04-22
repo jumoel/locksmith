@@ -149,6 +149,8 @@ func (r *RegistryClient) FetchMetadata(ctx context.Context, name string, version
 		}
 	}
 
+	meta.BundleDeps = v.ParseBundleDeps()
+
 	// Convert peer deps meta
 	if v.PeerDependenciesMeta != nil {
 		meta.PeerDepsMeta = make(map[string]ecosystem.PeerDepMeta)

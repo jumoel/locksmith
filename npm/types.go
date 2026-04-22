@@ -112,6 +112,37 @@ func (v *Version) ParseBin() map[string]string {
 	return nil
 }
 
+// ParseBundleDeps parses bundleDependencies / bundledDependencies.
+// The field can be an array of package names or boolean true (= bundle all deps).
+func (v *Version) ParseBundleDeps() map[string]bool {
+	raw := v.BundleDependencies
+	if raw == nil {
+		raw = v.BundledDependencies
+	}
+	if raw == nil {
+		return nil
+	}
+	// Try array of strings (most common).
+	var names []string
+	if err := json.Unmarshal(raw, &names); err == nil && len(names) > 0 {
+		m := make(map[string]bool, len(names))
+		for _, n := range names {
+			m[n] = true
+		}
+		return m
+	}
+	// Try boolean true (= bundle all deps).
+	var b bool
+	if err := json.Unmarshal(raw, &b); err == nil && b {
+		m := make(map[string]bool, len(v.Dependencies))
+		for name := range v.Dependencies {
+			m[name] = true
+		}
+		return m
+	}
+	return nil
+}
+
 // PeerMeta holds metadata about a peer dependency.
 type PeerMeta struct {
 	Optional bool `json:"optional,omitempty"`

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/internal/orderedjson"
@@ -102,11 +103,55 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 		byName[name][pkg.Node.Version] = pkg
 	}
 
+	// Pre-compute packages under a bundling parent. When a dependency
+	// declares bundleDependencies, bun nests ALL its transitive deps under
+	// the parent's key (e.g., npm/@isaacs/cliui instead of bare @isaacs/cliui).
+	// These packages must NOT get bare keys.
+	bundledPkg := make(map[string]bool) // "name@version" -> true
+	if result.Graph != nil && result.Graph.Root != nil {
+		var markBundled func(node *ecosystem.Node)
+		markBundled = func(node *ecosystem.Node) {
+			for _, edge := range node.Dependencies {
+				if edge.Target == nil {
+					continue
+				}
+				key := edge.Target.Name + "@" + edge.Target.Version
+				if bundledPkg[key] {
+					continue
+				}
+				bundledPkg[key] = true
+				markBundled(edge.Target)
+			}
+		}
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil && len(edge.Target.BundleDeps) > 0 {
+				markBundled(edge.Target)
+			}
+		}
+	}
+
+	// directlyBundled marks packages that are directly listed in a parent's
+	// bundleDependencies. These get "bundled": true in the lockfile metadata.
+	directlyBundled := make(map[string]bool)
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target == nil || len(edge.Target.BundleDeps) == 0 {
+				continue
+			}
+			for _, childEdge := range edge.Target.Dependencies {
+				if childEdge.Target != nil && edge.Target.BundleDeps[childEdge.Target.Name] {
+					directlyBundled[childEdge.Target.Name+"@"+childEdge.Target.Version] = true
+				}
+			}
+		}
+	}
+
 	// For single-version packages, key is the bare name.
 	// For multi-version packages, we need to walk the graph to find the path.
 	type keyedPkg struct {
-		key string
-		pkg *ResolvedPackage
+		key     string
+		pkg     *ResolvedPackage
+		bundled bool // directly listed in parent's bundleDependencies
 	}
 	var entries []keyedPkg
 
@@ -114,10 +159,14 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 	placed := make(map[string]bool)
 
 	// Place single-version packages first with bare name keys.
+	// Skip packages under bundling parents - they need path keys.
 	for name, versions := range byName {
 		if len(versions) == 1 {
 			for _, pkg := range versions {
 				pkgKey := name + "@" + pkg.Node.Version
+				if bundledPkg[pkgKey] {
+					continue // will be placed with path key during BFS
+				}
 				displayName := name
 				if alias, ok := aliasKey[pkgKey]; ok {
 					displayName = alias
@@ -165,14 +214,22 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 		// not resolved names (edge.Target.Name), because bun resolves deps
 		// by the name used in the parent's dependency listing.
 		type walkItem struct {
-			path string // full path using declared names, e.g. "express/send"
-			name string // declared name of this node (may be alias)
-			node *ecosystem.Node
+			path       string // full path using declared names, e.g. "express/send"
+			name       string // declared name of this node (may be alias)
+			node       *ecosystem.Node
+			bundleRoot string // non-empty when inside a bundled subtree (e.g. "npm")
 		}
 		var queue []walkItem
 		for _, edge := range result.Graph.Root.Dependencies {
 			if edge.Target != nil {
-				queue = append(queue, walkItem{path: edge.Name, name: edge.Name, node: edge.Target})
+				br := ""
+				if len(edge.Target.BundleDeps) > 0 {
+					br = edge.Name
+				}
+				queue = append(queue, walkItem{
+					path: edge.Name, name: edge.Name, node: edge.Target,
+					bundleRoot: br,
+				})
 			}
 		}
 		seen := make(map[string]bool)
@@ -195,23 +252,52 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 
 				if !placed[childKey] {
 					if pkg, ok := result.Packages[childKey]; ok {
-						// First version of a multi-version package gets bare name.
-						useBare := len(byName[edge.Target.Name]) > 1 && !barePlaced[edge.Target.Name]
-						if useBare {
-							displayName := edge.Name
-							entries = append(entries, keyedPkg{key: displayName, pkg: pkg})
-							barePlaced[edge.Target.Name] = true
-							usedKeys[displayName] = true
-						} else {
-							// Try immediate parent/child first; if that
-							// would collide with an existing key, use the
-							// full path from the root dep.
-							pathKey := item.name + "/" + edge.Name
-							if usedKeys[pathKey] {
-								pathKey = childPath
+						if item.bundleRoot != "" {
+							// Inside a bundled subtree: same hoisting logic
+							// as non-bundled, but all keys prefixed with the
+							// bundle root (e.g., npm/packageName).
+							prefix := item.bundleRoot + "/"
+							isAlias := edge.Name != edge.Target.Name
+							isMulti := len(byName[edge.Target.Name]) > 1
+							if isAlias || (!isMulti) || (isMulti && !barePlaced[edge.Target.Name]) {
+								// Aliases, single-version, and first multi-version
+								// all get hoisted (short) keys.
+								key := prefix + edge.Name
+								entries = append(entries, keyedPkg{
+									key: key, pkg: pkg,
+									bundled: directlyBundled[childKey],
+								})
+								if isMulti && !isAlias {
+									barePlaced[edge.Target.Name] = true
+								}
+								usedKeys[key] = true
+							} else {
+								// Subsequent multi-version: use full path.
+								entries = append(entries, keyedPkg{
+									key: childPath, pkg: pkg,
+									bundled: directlyBundled[childKey],
+								})
+								usedKeys[childPath] = true
 							}
-							entries = append(entries, keyedPkg{key: pathKey, pkg: pkg})
-							usedKeys[pathKey] = true
+						} else {
+							// First version of a multi-version package gets bare name.
+							useBare := len(byName[edge.Target.Name]) > 1 && !barePlaced[edge.Target.Name]
+							if useBare {
+								displayName := edge.Name
+								entries = append(entries, keyedPkg{key: displayName, pkg: pkg})
+								barePlaced[edge.Target.Name] = true
+								usedKeys[displayName] = true
+							} else {
+								// Try immediate parent/child first; if that
+								// would collide with an existing key, use the
+								// full path from the root dep.
+								pathKey := item.name + "/" + edge.Name
+								if usedKeys[pathKey] {
+									pathKey = childPath
+								}
+								entries = append(entries, keyedPkg{key: pathKey, pkg: pkg})
+								usedKeys[pathKey] = true
+							}
 						}
 						placed[childKey] = true
 					}
@@ -220,7 +306,14 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 					// already placed under its real name. Bun creates separate
 					// package entries for alias names so they can be looked up
 					// by the declared dependency name.
-					aliasPathKey := item.name + "/" + edge.Name
+					var aliasPathKey string
+					if item.bundleRoot != "" {
+						// In bundled subtrees, alias entries are hoisted
+						// to the bundle root level (e.g., npm/string-width-cjs).
+						aliasPathKey = item.bundleRoot + "/" + edge.Name
+					} else {
+						aliasPathKey = item.name + "/" + edge.Name
+					}
 					if !usedKeys[aliasPathKey] {
 						if pkg, ok := result.Packages[childKey]; ok {
 							entries = append(entries, keyedPkg{key: aliasPathKey, pkg: pkg})
@@ -229,7 +322,99 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 					}
 				}
 
-				queue = append(queue, walkItem{path: childPath, name: edge.Name, node: edge.Target})
+				queue = append(queue, walkItem{
+					path: childPath, name: edge.Name, node: edge.Target,
+					bundleRoot: item.bundleRoot,
+				})
+			}
+		}
+	}
+
+	// Post-pass: add duplicate entries for multi-version packages in
+	// bundled subtrees. Bun nests bundled deps and needs a separate
+	// entry for each parent that references a non-hoisted multi-version
+	// package. Hoisted versions (at prefix/name) are already findable
+	// and don't need duplicate entries.
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, rootEdge := range result.Graph.Root.Dependencies {
+			if rootEdge.Target == nil || len(rootEdge.Target.BundleDeps) == 0 {
+				continue
+			}
+			prefix := rootEdge.Name + "/"
+
+			// Identify which versions are at the hoisted level.
+			hoisted := make(map[string]bool) // "name@version"
+			for _, e := range entries {
+				if !strings.HasPrefix(e.key, prefix) {
+					continue
+				}
+				rel := e.key[len(prefix):]
+				// Hoisted = no slash (or one slash for scoped @scope/pkg).
+				slashes := strings.Count(rel, "/")
+				isScoped := strings.HasPrefix(rel, "@")
+				if slashes == 0 || (isScoped && slashes == 1) {
+					nk := e.pkg.Node.Name + "@" + e.pkg.Node.Version
+					hoisted[nk] = true
+				}
+			}
+
+			// Walk bundled subtree. For non-hoisted multi-version
+			// children, create entries at each parent path. Run
+			// multiple passes so entries created in one pass can
+			// serve as parents for the next.
+			// Collect bundled nodes once.
+			var bundledNodes []*ecosystem.Node
+			{
+				vis := make(map[string]bool)
+				q := []*ecosystem.Node{rootEdge.Target}
+				for len(q) > 0 {
+					n := q[0]
+					q = q[1:]
+					nk := n.Name + "@" + n.Version
+					if vis[nk] {
+						continue
+					}
+					vis[nk] = true
+					bundledNodes = append(bundledNodes, n)
+					for _, e := range n.Dependencies {
+						if e.Target != nil {
+							q = append(q, e.Target)
+						}
+					}
+				}
+			}
+			for pass := 0; pass < 3; pass++ {
+				added := 0
+				nodeKeys := make(map[string][]string)
+				for _, e := range entries {
+					nk := e.pkg.Node.Name + "@" + e.pkg.Node.Version
+					nodeKeys[nk] = append(nodeKeys[nk], e.key)
+				}
+				for _, node := range bundledNodes {
+					nk := node.Name + "@" + node.Version
+					parentPaths := nodeKeys[nk]
+					for _, edge := range node.Dependencies {
+						if edge.Target == nil {
+							continue
+						}
+						childKey := edge.Target.Name + "@" + edge.Target.Version
+						if len(byName[edge.Target.Name]) > 1 && !hoisted[childKey] {
+							for _, pp := range parentPaths {
+								ek := pp + "/" + edge.Name
+								if !usedKeys[ek] {
+									if pkg, ok := result.Packages[childKey]; ok {
+										entries = append(entries, keyedPkg{key: ek, pkg: pkg})
+										usedKeys[ek] = true
+										added++
+									}
+								}
+							}
+						}
+					}
+				}
+				if added == 0 {
+					break
+				}
 			}
 		}
 	}
@@ -241,7 +426,7 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 
 	packages := make(orderedjson.Map, 0, len(entries))
 	for _, e := range entries {
-		packages = append(packages, orderedjson.Entry{Key: e.key, Value: buildPackageEntry(e.pkg)})
+		packages = append(packages, orderedjson.Entry{Key: e.key, Value: buildPackageEntry(e.pkg, e.bundled)})
 	}
 
 	return packages
@@ -249,7 +434,7 @@ func buildPackagesFromGraph(result *ResolveResult) orderedjson.Map {
 
 // buildPackageEntry constructs the array for a single package:
 // [resolved-spec, "", metadata-object, integrity]
-func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
+func buildPackageEntry(pkg *ResolvedPackage, bundled bool) []interface{} {
 	node := pkg.Node
 	resolvedSpec := fmt.Sprintf("%s@%s", node.Name, node.Version)
 
@@ -276,6 +461,10 @@ func buildPackageEntry(pkg *ResolvedPackage) []interface{} {
 		metadata = append(metadata, orderedjson.Entry{
 			Key: "optionalDependencies", Value: orderedjson.FromStringMap(pkg.OptionalDeps),
 		})
+	}
+
+	if bundled {
+		metadata = append(metadata, orderedjson.Entry{Key: "bundled", Value: true})
 	}
 
 	if len(pkg.PeerDeps) > 0 {
