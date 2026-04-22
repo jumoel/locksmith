@@ -1,0 +1,15 @@
+{
+  "name": "locksmith-test-peer-deps-meta-mixed",
+  "version": "1.0.0",
+  "dependencies": {
+    "react-dom": "^18.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
+}

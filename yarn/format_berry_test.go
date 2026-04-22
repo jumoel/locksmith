@@ -76,6 +76,168 @@ func TestBerryRootDepsQuoting(t *testing.T) {
 	}
 }
 
+// TestBerryPeerDepsMetaAccuracy verifies that only peers explicitly marked
+// optional in peerDependenciesMeta get the optional: true flag.
+func TestBerryPeerDepsMetaAccuracy(t *testing.T) {
+	// 3 peers: react (required), react-dom (optional), @types/react (required).
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test-project",
+			Version: "1.0.0",
+		},
+		Nodes: map[string]*ecosystem.Node{},
+	}
+
+	result := &ResolveResult{
+		Graph:    graph,
+		Packages: map[string]*ResolvedPackage{},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "react", Constraint: "^18.0.0", Type: ecosystem.DepPeer},
+			{Name: "react-dom", Constraint: "^18.0.0", Type: ecosystem.DepPeer},
+			{Name: "@types/react", Constraint: "^18.0.0", Type: ecosystem.DepPeer},
+		},
+		PeerDepsMeta: map[string]ecosystem.PeerDepMeta{
+			"react-dom": {Optional: true},
+		},
+	}
+
+	formatter := NewYarnBerryV6Formatter()
+	data, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("FormatFromResult failed: %v", err)
+	}
+	output := string(data)
+
+	// peerDependencies should list all 3 peers.
+	if !strings.Contains(output, "  peerDependencies:\n") {
+		t.Fatal("expected peerDependencies section")
+	}
+	if !strings.Contains(output, `react: "^18.0.0"`) {
+		t.Error("missing react in peerDependencies")
+	}
+	if !strings.Contains(output, `react-dom: "^18.0.0"`) {
+		t.Error("missing react-dom in peerDependencies")
+	}
+
+	// peerDependenciesMeta should only contain react-dom.
+	if !strings.Contains(output, "  peerDependenciesMeta:\n") {
+		t.Fatal("expected peerDependenciesMeta section")
+	}
+	if !strings.Contains(output, "    react-dom:\n      optional: true\n") {
+		t.Error("react-dom should be marked optional in peerDependenciesMeta")
+	}
+
+	// react and @types/react must NOT appear in peerDependenciesMeta.
+	// Count occurrences of "optional: true" - should be exactly 1.
+	count := strings.Count(output, "optional: true")
+	if count != 1 {
+		t.Errorf("expected 1 occurrence of 'optional: true', got %d.\nOutput:\n%s", count, output)
+	}
+}
+
+// TestBerryPeerDepsMetaAllRequired verifies that the peerDependenciesMeta
+// section is absent when no peers are optional.
+func TestBerryPeerDepsMetaAllRequired(t *testing.T) {
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test-project",
+			Version: "1.0.0",
+		},
+		Nodes: map[string]*ecosystem.Node{},
+	}
+
+	result := &ResolveResult{
+		Graph:    graph,
+		Packages: map[string]*ResolvedPackage{},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "react", Constraint: "^18.0.0", Type: ecosystem.DepPeer},
+			{Name: "react-dom", Constraint: "^18.0.0", Type: ecosystem.DepPeer},
+		},
+		// No PeerDepsMeta - all peers are required.
+	}
+
+	formatter := NewYarnBerryV6Formatter()
+	data, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("FormatFromResult failed: %v", err)
+	}
+	output := string(data)
+
+	// peerDependencies should be present.
+	if !strings.Contains(output, "  peerDependencies:\n") {
+		t.Fatal("expected peerDependencies section")
+	}
+
+	// peerDependenciesMeta should NOT be present.
+	if strings.Contains(output, "peerDependenciesMeta") {
+		t.Errorf("peerDependenciesMeta should be absent when no peers are optional.\nOutput:\n%s", output)
+	}
+}
+
+// TestBerryPeerDepsMetaAllOptional verifies that all peers appear in
+// peerDependenciesMeta when all are optional.
+func TestBerryPeerDepsMetaAllOptional(t *testing.T) {
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test-project",
+			Version: "1.0.0",
+		},
+		Nodes: map[string]*ecosystem.Node{},
+	}
+
+	result := &ResolveResult{
+		Graph:    graph,
+		Packages: map[string]*ResolvedPackage{},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "react", Constraint: "^18.0.0", Type: ecosystem.DepPeer},
+			{Name: "react-dom", Constraint: "^18.0.0", Type: ecosystem.DepPeer},
+		},
+		PeerDepsMeta: map[string]ecosystem.PeerDepMeta{
+			"react":     {Optional: true},
+			"react-dom": {Optional: true},
+		},
+	}
+
+	formatter := NewYarnBerryV6Formatter()
+	data, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("FormatFromResult failed: %v", err)
+	}
+	output := string(data)
+
+	// peerDependenciesMeta should list both peers.
+	if !strings.Contains(output, "  peerDependenciesMeta:\n") {
+		t.Fatal("expected peerDependenciesMeta section")
+	}
+
+	count := strings.Count(output, "optional: true")
+	if count != 2 {
+		t.Errorf("expected 2 occurrences of 'optional: true', got %d.\nOutput:\n%s", count, output)
+	}
+
+	if !strings.Contains(output, "    react:\n      optional: true\n") {
+		t.Error("react should be marked optional")
+	}
+	if !strings.Contains(output, "    react-dom:\n      optional: true\n") {
+		t.Error("react-dom should be marked optional")
+	}
+}
+
 // TestBerryConstraintPreservation verifies that all constraints are kept
 // when multiple ranges resolve to the same version.
 func TestBerryConstraintPreservation(t *testing.T) {

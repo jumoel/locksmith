@@ -57,9 +57,9 @@ func TestSpecParser_Parse_Full(t *testing.T) {
 		t.Errorf("Version = %q, want %q", spec.Version, "2.5.0")
 	}
 
-	// 3 regular + 2 dev + 1 peer + 1 optional = 7
-	if got := len(spec.Dependencies); got != 7 {
-		t.Fatalf("Dependencies count = %d, want 7", got)
+	// 3 regular + 2 dev + 2 peer + 1 optional = 8
+	if got := len(spec.Dependencies); got != 8 {
+		t.Fatalf("Dependencies count = %d, want 8", got)
 	}
 
 	// Verify sorting: deps should be sorted by name.
@@ -92,6 +92,7 @@ func TestSpecParser_Parse_Full(t *testing.T) {
 		{"jest", ecosystem.DepDev, "^29.0.0"},
 		{"typescript", ecosystem.DepDev, "~5.3.0"},
 		{"react", ecosystem.DepPeer, "^18.0.0"},
+		{"react-dom", ecosystem.DepPeer, "^18.0.0"},
 		{"fsevents", ecosystem.DepOptional, "^2.3.0"},
 	}
 
@@ -106,6 +107,110 @@ func TestSpecParser_Parse_Full(t *testing.T) {
 			}
 		})
 	}
+
+	// Verify peerDependenciesMeta: react-dom is optional, react is not.
+	if spec.PeerDepsMeta == nil {
+		t.Fatal("PeerDepsMeta is nil, expected non-nil")
+	}
+	if pm, ok := spec.PeerDepsMeta["react-dom"]; !ok {
+		t.Error("PeerDepsMeta missing react-dom entry")
+	} else if !pm.Optional {
+		t.Error("PeerDepsMeta[react-dom].Optional = false, want true")
+	}
+	if _, ok := spec.PeerDepsMeta["react"]; ok {
+		t.Error("PeerDepsMeta should not contain react (not in peerDependenciesMeta)")
+	}
+}
+
+func TestSpecParser_Parse_PeerDepsMeta(t *testing.T) {
+	t.Run("mixed optional and required peers", func(t *testing.T) {
+		data := []byte(`{
+			"name": "test",
+			"peerDependencies": {
+				"react": "^18.0.0",
+				"react-dom": "^18.0.0",
+				"@types/react": "^18.0.0"
+			},
+			"peerDependenciesMeta": {
+				"react-dom": { "optional": true },
+				"@types/react": { "optional": true }
+			}
+		}`)
+
+		p := NewSpecParser()
+		spec, err := p.Parse(data)
+		if err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+
+		if spec.PeerDepsMeta == nil {
+			t.Fatal("PeerDepsMeta is nil")
+		}
+		if len(spec.PeerDepsMeta) != 2 {
+			t.Fatalf("PeerDepsMeta count = %d, want 2", len(spec.PeerDepsMeta))
+		}
+		if !spec.PeerDepsMeta["react-dom"].Optional {
+			t.Error("react-dom should be optional")
+		}
+		if !spec.PeerDepsMeta["@types/react"].Optional {
+			t.Error("@types/react should be optional")
+		}
+		if _, ok := spec.PeerDepsMeta["react"]; ok {
+			t.Error("react should not be in PeerDepsMeta")
+		}
+	})
+
+	t.Run("no peerDependenciesMeta", func(t *testing.T) {
+		data := []byte(`{
+			"name": "test",
+			"peerDependencies": {
+				"react": "^18.0.0"
+			}
+		}`)
+
+		p := NewSpecParser()
+		spec, err := p.Parse(data)
+		if err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+
+		if spec.PeerDepsMeta != nil {
+			t.Errorf("PeerDepsMeta should be nil, got %v", spec.PeerDepsMeta)
+		}
+	})
+
+	t.Run("all peers optional", func(t *testing.T) {
+		data := []byte(`{
+			"name": "test",
+			"peerDependencies": {
+				"react": "^18.0.0",
+				"react-dom": "^18.0.0"
+			},
+			"peerDependenciesMeta": {
+				"react": { "optional": true },
+				"react-dom": { "optional": true }
+			}
+		}`)
+
+		p := NewSpecParser()
+		spec, err := p.Parse(data)
+		if err != nil {
+			t.Fatalf("Parse() error: %v", err)
+		}
+
+		if spec.PeerDepsMeta == nil {
+			t.Fatal("PeerDepsMeta is nil")
+		}
+		if len(spec.PeerDepsMeta) != 2 {
+			t.Fatalf("PeerDepsMeta count = %d, want 2", len(spec.PeerDepsMeta))
+		}
+		if !spec.PeerDepsMeta["react"].Optional {
+			t.Error("react should be optional")
+		}
+		if !spec.PeerDepsMeta["react-dom"].Optional {
+			t.Error("react-dom should be optional")
+		}
+	})
 }
 
 func TestSpecParser_Parse_InvalidJSON(t *testing.T) {

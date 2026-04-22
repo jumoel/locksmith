@@ -59,6 +59,9 @@ type ProjectSpec struct {
 	Name         string
 	Version      string
 	Dependencies []DeclaredDep
+	// PeerDepsMeta holds metadata about peer dependencies (e.g., optional flag)
+	// as declared in the project's package.json peerDependenciesMeta field.
+	PeerDepsMeta map[string]PeerDepMeta
 }
 
 // DeclaredDep is a dependency declared in a spec file.

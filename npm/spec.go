@@ -16,7 +16,10 @@ type packageJSON struct {
 	DevDependencies      map[string]string `json:"devDependencies,omitempty"`
 	PeerDependencies     map[string]string `json:"peerDependencies,omitempty"`
 	OptionalDependencies map[string]string `json:"optionalDependencies,omitempty"`
-	Overrides            json.RawMessage   `json:"overrides,omitempty"`
+	PeerDependenciesMeta map[string]struct {
+		Optional bool `json:"optional"`
+	} `json:"peerDependenciesMeta,omitempty"`
+	Overrides json.RawMessage `json:"overrides,omitempty"`
 }
 
 // SpecParser parses package.json files.
@@ -69,6 +72,13 @@ func (p *SpecParser) Parse(data []byte) (*ecosystem.ProjectSpec, error) {
 			Constraint: constraint,
 			Type:       ecosystem.DepOptional,
 		})
+	}
+
+	if len(pkg.PeerDependenciesMeta) > 0 {
+		spec.PeerDepsMeta = make(map[string]ecosystem.PeerDepMeta, len(pkg.PeerDependenciesMeta))
+		for name, pm := range pkg.PeerDependenciesMeta {
+			spec.PeerDepsMeta[name] = ecosystem.PeerDepMeta{Optional: pm.Optional}
+		}
 	}
 
 	// Sort dependencies by name for deterministic output.

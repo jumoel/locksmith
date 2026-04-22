@@ -48,6 +48,7 @@ type ResolveResult struct {
 type ResolvedPackage struct {
 	Node         *ecosystem.Node
 	Dependencies map[string]string // name -> resolved version
+	PeerDepsMeta map[string]ecosystem.PeerDepMeta
 }
 
 // Resolve satisfies the ecosystem.Resolver interface by returning just the graph.
@@ -78,7 +79,11 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 				resolvedDeps[e.Name] = e.Target.Version
 			}
 		}
-		packages[key] = &ResolvedPackage{Node: node, Dependencies: resolvedDeps}
+		pkg := &ResolvedPackage{Node: node, Dependencies: resolvedDeps}
+		if len(meta.PeerDepsMeta) > 0 {
+			pkg.PeerDepsMeta = meta.PeerDepsMeta
+		}
+		packages[key] = pkg
 	}
 
 	graph, err := ecosystem.Resolve(ctx, project, registry, opts, policy)

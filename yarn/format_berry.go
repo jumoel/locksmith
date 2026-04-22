@@ -243,17 +243,23 @@ func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec
 						}
 						b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, g.Peer[name]))
 					}
-					// Mark all peers as optional in peerDependenciesMeta.
-					// TODO: track actual peerDependenciesMeta from package.json
-					// to distinguish required vs optional peers.
-					b.WriteString("  peerDependenciesMeta:\n")
+					// peerDependenciesMeta: only mark peers that are actually optional.
+					var optionalPeerNames []string
 					for _, name := range peerNames {
-						yamlName := name
-						if strings.HasPrefix(name, "@") {
-							yamlName = fmt.Sprintf("%q", name)
+						if pm, ok := project.PeerDepsMeta[name]; ok && pm.Optional {
+							optionalPeerNames = append(optionalPeerNames, name)
 						}
-						b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
-						b.WriteString("      optional: true\n")
+					}
+					if len(optionalPeerNames) > 0 {
+						b.WriteString("  peerDependenciesMeta:\n")
+						for _, name := range optionalPeerNames {
+							yamlName := name
+							if strings.HasPrefix(name, "@") {
+								yamlName = fmt.Sprintf("%q", name)
+							}
+							b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
+							b.WriteString("      optional: true\n")
+						}
 					}
 				}
 				b.WriteString("  languageName: unknown\n")
