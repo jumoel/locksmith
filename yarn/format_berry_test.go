@@ -121,10 +121,10 @@ func TestBerryPeerDepsMetaAccuracy(t *testing.T) {
 	if !strings.Contains(output, "  peerDependencies:\n") {
 		t.Fatal("expected peerDependencies section")
 	}
-	if !strings.Contains(output, `react: "^18.0.0"`) {
+	if !strings.Contains(output, "react: ^18.0.0") {
 		t.Error("missing react in peerDependencies")
 	}
-	if !strings.Contains(output, `react-dom: "^18.0.0"`) {
+	if !strings.Contains(output, "react-dom: ^18.0.0") {
 		t.Error("missing react-dom in peerDependencies")
 	}
 

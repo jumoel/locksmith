@@ -321,7 +321,12 @@ func writeBerryWorkspaceEntry(b *strings.Builder, name, workspacePath string, de
 			if strings.HasPrefix(n, "@") {
 				yamlName = fmt.Sprintf("%q", n)
 			}
-			b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, g.Peer[n]))
+			c := g.Peer[n]
+			if strings.ContainsAny(c, ":*") || c == "true" || c == "false" || c == "null" {
+				b.WriteString(fmt.Sprintf("    %s: \"%s\"\n", yamlName, c))
+			} else {
+				b.WriteString(fmt.Sprintf("    %s: %s\n", yamlName, c))
+			}
 		}
 		if peerDepsMeta != nil {
 			var optionalPeerNames []string
