@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/jumoel/locksmith"
+	"github.com/jumoel/locksmith/npm"
 )
 
 // formatTestCase defines a lockfile format and its expected output characteristics.
@@ -58,12 +59,21 @@ func TestGenerate(t *testing.T) {
 				t.Run(fixture, func(t *testing.T) {
 					t.Parallel()
 					specData := readFixture(t, fixture)
+					fixtureDir := filepath.Join("fixtures", fixture)
 
-					ctx := context.Background()
-					result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
+					opts := locksmith.GenerateOptions{
 						SpecFile:     specData,
 						OutputFormat: tc.Format,
-					})
+						SpecDir:      fixtureDir,
+					}
+
+					// Detect workspace fixtures and pass workspace members.
+					if members := discoverWorkspaceMembers(t, fixtureDir, specData); len(members) > 0 {
+						opts.WorkspaceMembers = members
+					}
+
+					ctx := context.Background()
+					result, err := locksmith.Generate(ctx, opts)
 					if err != nil {
 						t.Fatalf("Generate(%s, %s) failed: %v", tc.Format, fixture, err)
 					}
@@ -179,4 +189,32 @@ func truncate(data []byte, n int) string {
 		return string(data)
 	}
 	return string(data[:n]) + "..."
+}
+
+// discoverWorkspaceMembers detects workspace globs in a package.json and reads
+// member spec files. Returns nil if the fixture is not a workspace project.
+func discoverWorkspaceMembers(t *testing.T, fixtureDir string, specData []byte) map[string][]byte {
+	t.Helper()
+	globs, err := npm.ParseWorkspaceGlobs(specData)
+	if err != nil || len(globs) == 0 {
+		return nil
+	}
+	members := make(map[string][]byte)
+	for _, glob := range globs {
+		pattern := filepath.Join(fixtureDir, glob)
+		matches, _ := filepath.Glob(pattern)
+		for _, match := range matches {
+			pkgPath := filepath.Join(match, "package.json")
+			data, err := os.ReadFile(pkgPath)
+			if err != nil {
+				continue
+			}
+			relPath, _ := filepath.Rel(fixtureDir, match)
+			members[relPath] = data
+		}
+	}
+	if len(members) == 0 {
+		return nil
+	}
+	return members
 }
