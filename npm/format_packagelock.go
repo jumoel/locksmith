@@ -119,6 +119,15 @@ func buildRootEntry(project *ecosystem.ProjectSpec) orderedjson.Map {
 		{Key: "version", Value: project.Version},
 	}
 
+	// Add workspaces field if this is a workspace project.
+	if len(project.Workspaces) > 0 {
+		wsPaths := make([]string, 0, len(project.Workspaces))
+		for _, ws := range project.Workspaces {
+			wsPaths = append(wsPaths, ws.RelPath)
+		}
+		entry = append(entry, orderedjson.Entry{Key: "workspaces", Value: wsPaths})
+	}
+
 	// Group declared dependencies by type.
 	g := ecosystem.GroupDependenciesByType(project.Dependencies)
 
