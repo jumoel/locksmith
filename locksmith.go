@@ -242,6 +242,15 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		spec.Overrides = overrides
 	}
 
+	// Parse pnpm packageExtensions and attach to spec.
+	if parseResult.PnpmPackageExtensions != nil {
+		extensions, err := npm.ParsePackageExtensions(parseResult.PnpmPackageExtensions)
+		if err != nil {
+			return nil, fmt.Errorf("parsing pnpm packageExtensions: %w", err)
+		}
+		spec.PackageExtensions = extensions
+	}
+
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)

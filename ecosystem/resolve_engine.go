@@ -83,35 +83,37 @@ func (p *ResolverPolicy) ApplyOverride(override *ResolverPolicy) {
 
 // resolverState holds state during resolution.
 type resolverState struct {
-	registry       Registry
-	cutoff         *time.Time
-	ctx            context.Context
-	nodes          map[string]*Node // "name@version" -> node
-	nodeIndex      *NodeIndex       // O(1) name lookups
-	resolving      map[string]bool  // cycle detection
-	projectDeps    map[string]bool  // root dep names
-	policy         ResolverPolicy
-	specDir        string // for resolving file: deps
-	workspaceIndex *WorkspaceIndex
-	overrides      *OverrideSet // version overrides from package.json
-	ancestry       []string     // current resolution chain for override matching
+	registry          Registry
+	cutoff            *time.Time
+	ctx               context.Context
+	nodes             map[string]*Node // "name@version" -> node
+	nodeIndex         *NodeIndex       // O(1) name lookups
+	resolving         map[string]bool  // cycle detection
+	projectDeps       map[string]bool  // root dep names
+	policy            ResolverPolicy
+	specDir           string // for resolving file: deps
+	workspaceIndex    *WorkspaceIndex
+	overrides         *OverrideSet         // version overrides from package.json
+	packageExtensions *PackageExtensionSet // pnpm packageExtensions
+	ancestry          []string             // current resolution chain for override matching
 }
 
 // Resolve executes the shared dependency resolution algorithm.
 // PM-specific data is collected via the policy.OnNodeResolved callback.
 func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts ResolveOptions, policy ResolverPolicy) (*Graph, error) {
 	state := &resolverState{
-		registry:       registry,
-		cutoff:         opts.CutoffDate,
-		ctx:            ctx,
-		nodes:          make(map[string]*Node),
-		nodeIndex:      NewNodeIndex(),
-		resolving:      make(map[string]bool),
-		projectDeps:    make(map[string]bool),
-		policy:         policy,
-		specDir:        opts.SpecDir,
-		workspaceIndex: opts.WorkspaceIndex,
-		overrides:      project.Overrides,
+		registry:          registry,
+		cutoff:            opts.CutoffDate,
+		ctx:               ctx,
+		nodes:             make(map[string]*Node),
+		nodeIndex:         NewNodeIndex(),
+		resolving:         make(map[string]bool),
+		projectDeps:       make(map[string]bool),
+		policy:            policy,
+		specDir:           opts.SpecDir,
+		workspaceIndex:    opts.WorkspaceIndex,
+		overrides:         project.Overrides,
+		packageExtensions: project.PackageExtensions,
 	}
 
 	for _, dep := range project.Dependencies {
@@ -381,6 +383,9 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	if err != nil {
 		return nil, fmt.Errorf("fetching metadata for %s@%s: %w", actualName, version, err)
 	}
+
+	// Apply packageExtensions to inject additional deps before building the node.
+	s.packageExtensions.Apply(meta)
 
 	node := &Node{
 		Name:             meta.Name,

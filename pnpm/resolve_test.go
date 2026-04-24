@@ -210,3 +210,107 @@ func TestPnpmResolve_TransitiveDeps(t *testing.T) {
 		t.Errorf("expected 0 deps for C, got %d", len(cPkg.Dependencies))
 	}
 }
+
+func TestPnpmResolve_PackageExtensions(t *testing.T) {
+	// Setup: A@1.0.0 depends on B@^1.0.0.
+	// B@1.0.0 has NO dependency on C.
+	// packageExtensions adds C as a dep of B.
+	// After resolution, C should appear in the graph via B.
+	reg := newMockRegistry()
+	reg.addVersion("A", "1.0.0", baseTime, map[string]string{"B": "^1.0.0"})
+	reg.addVersion("B", "1.0.0", baseTime, nil) // B has no deps
+	reg.addVersion("C", "2.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+		PackageExtensions: &ecosystem.PackageExtensionSet{
+			Extensions: []ecosystem.PackageExtension{
+				{
+					Name:         "B",
+					Dependencies: map[string]string{"C": "^2.0.0"},
+				},
+			},
+		},
+	}
+
+	r := NewResolver()
+	result, err := r.ResolveForLockfile(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify A is resolved.
+	if len(result.Graph.Root.Dependencies) != 1 {
+		t.Fatalf("expected 1 root dep, got %d", len(result.Graph.Root.Dependencies))
+	}
+
+	// Verify C@2.0.0 is in the packages map (injected via extension).
+	cPkg, ok := result.Packages["C@2.0.0"]
+	if !ok {
+		t.Fatal("C@2.0.0 not in packages map - packageExtensions not applied")
+	}
+	if cPkg.Node.Version != "2.0.0" {
+		t.Errorf("C version = %s, want 2.0.0", cPkg.Node.Version)
+	}
+
+	// Verify B@1.0.0 lists C in its dependencies.
+	bPkg, ok := result.Packages["B@1.0.0"]
+	if !ok {
+		t.Fatal("B@1.0.0 not in packages map")
+	}
+	if bPkg.Dependencies["C"] != "2.0.0" {
+		t.Errorf("B's dep C version = %q, want %q", bPkg.Dependencies["C"], "2.0.0")
+	}
+}
+
+func TestPnpmResolve_PackageExtensions_VersionRange(t *testing.T) {
+	// Setup: A@1.0.0 depends on B@^1.0.0 and B@^2.0.0.
+	// packageExtensions adds C as a dep of B, but only for B@^2.0.0.
+	// After resolution, C should appear via B@2.0.0 but NOT via B@1.0.0.
+	reg := newMockRegistry()
+	reg.addVersion("A", "1.0.0", baseTime, map[string]string{"B": "^2.0.0"})
+	reg.addVersion("B", "1.0.0", baseTime, nil)
+	reg.addVersion("B", "2.0.0", baseTime, nil)
+	reg.addVersion("C", "1.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+		PackageExtensions: &ecosystem.PackageExtensionSet{
+			Extensions: []ecosystem.PackageExtension{
+				{
+					Name:         "B",
+					VersionRange: "^2.0.0",
+					Dependencies: map[string]string{"C": "^1.0.0"},
+				},
+			},
+		},
+	}
+
+	r := NewResolver()
+	result, err := r.ResolveForLockfile(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// B@2.0.0 should have C as dep.
+	bPkg, ok := result.Packages["B@2.0.0"]
+	if !ok {
+		t.Fatal("B@2.0.0 not in packages map")
+	}
+	if bPkg.Dependencies["C"] != "1.0.0" {
+		t.Errorf("B@2.0.0 dep C = %q, want %q", bPkg.Dependencies["C"], "1.0.0")
+	}
+
+	// C should be in the graph.
+	if _, ok := result.Packages["C@1.0.0"]; !ok {
+		t.Error("C@1.0.0 not in packages map - extension not applied for B@2.0.0")
+	}
+}

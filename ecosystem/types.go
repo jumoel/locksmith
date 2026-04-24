@@ -79,6 +79,10 @@ type ProjectSpec struct {
 	// Overrides holds parsed version overrides (npm overrides, pnpm overrides,
 	// yarn resolutions). Nil when no overrides are declared.
 	Overrides *OverrideSet
+	// PackageExtensions holds parsed pnpm packageExtensions that inject
+	// additional dependencies into packages at resolution time.
+	// Nil when no extensions are declared.
+	PackageExtensions *PackageExtensionSet
 }
 
 // DeclaredDep is a dependency declared in a spec file.

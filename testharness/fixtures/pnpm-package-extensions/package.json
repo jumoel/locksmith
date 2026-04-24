@@ -1,0 +1,16 @@
+{
+  "name": "locksmith-test-pnpm-extensions",
+  "version": "1.0.0",
+  "dependencies": {
+    "is-odd": "^3.0.0"
+  },
+  "pnpm": {
+    "packageExtensions": {
+      "is-odd@*": {
+        "dependencies": {
+          "ms": "^2.1.0"
+        }
+      }
+    }
+  }
+}
