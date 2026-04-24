@@ -259,6 +259,215 @@ func TestSpecParser_Parse_EmptyObject(t *testing.T) {
 	}
 }
 
+func TestSpecParser_ParseFull_NpmOverrides(t *testing.T) {
+	data := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {"is-odd": "^3.0.0"},
+		"overrides": {"is-number": "6.0.0"}
+	}`)
+
+	p := NewSpecParser()
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	if result.Spec.Name != "test" {
+		t.Errorf("Spec.Name = %q, want %q", result.Spec.Name, "test")
+	}
+	if result.NpmOverrides == nil {
+		t.Fatal("NpmOverrides is nil")
+	}
+	if string(result.NpmOverrides) != `{"is-number": "6.0.0"}` {
+		t.Errorf("NpmOverrides = %s", string(result.NpmOverrides))
+	}
+	if result.PnpmOverrides != nil {
+		t.Error("PnpmOverrides should be nil")
+	}
+	if result.YarnResolutions != nil {
+		t.Error("YarnResolutions should be nil")
+	}
+}
+
+func TestSpecParser_ParseFull_PnpmOverrides(t *testing.T) {
+	data := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {"is-odd": "^3.0.0"},
+		"pnpm": {"overrides": {"is-number": "6.0.0"}}
+	}`)
+
+	p := NewSpecParser()
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	if result.PnpmOverrides == nil {
+		t.Fatal("PnpmOverrides is nil")
+	}
+	if string(result.PnpmOverrides) != `{"is-number": "6.0.0"}` {
+		t.Errorf("PnpmOverrides = %s", string(result.PnpmOverrides))
+	}
+}
+
+func TestSpecParser_ParseFull_YarnResolutions(t *testing.T) {
+	data := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {"is-odd": "^3.0.0"},
+		"resolutions": {"is-number": "6.0.0"}
+	}`)
+
+	p := NewSpecParser()
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	if result.YarnResolutions == nil {
+		t.Fatal("YarnResolutions is nil")
+	}
+	if string(result.YarnResolutions) != `{"is-number": "6.0.0"}` {
+		t.Errorf("YarnResolutions = %s", string(result.YarnResolutions))
+	}
+}
+
+func TestSpecParser_ParseFull_NoOverrides(t *testing.T) {
+	data := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {"is-odd": "^3.0.0"}
+	}`)
+
+	p := NewSpecParser()
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	if result.NpmOverrides != nil {
+		t.Error("NpmOverrides should be nil")
+	}
+	if result.PnpmOverrides != nil {
+		t.Error("PnpmOverrides should be nil")
+	}
+	if result.YarnResolutions != nil {
+		t.Error("YarnResolutions should be nil")
+	}
+}
+
+func TestSpecParser_ParseFull_AllOverrides(t *testing.T) {
+	// Edge case: all three override formats present (unlikely but valid JSON).
+	data := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {"is-odd": "^3.0.0"},
+		"overrides": {"a": "1.0.0"},
+		"pnpm": {"overrides": {"b": "2.0.0"}},
+		"resolutions": {"c": "3.0.0"}
+	}`)
+
+	p := NewSpecParser()
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	if result.NpmOverrides == nil {
+		t.Error("NpmOverrides should be non-nil")
+	}
+	if result.PnpmOverrides == nil {
+		t.Error("PnpmOverrides should be non-nil")
+	}
+	if result.YarnResolutions == nil {
+		t.Error("YarnResolutions should be non-nil")
+	}
+}
+
+func TestSpecParser_ParseFull_InvalidJSON(t *testing.T) {
+	p := NewSpecParser()
+	_, err := p.ParseFull([]byte(`{invalid`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestSpecParser_ParseFull_PreservesSpecBehavior(t *testing.T) {
+	// ParseFull should produce the same Spec as Parse.
+	data := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {"is-odd": "^3.0.0"},
+		"devDependencies": {"jest": "^29.0.0"}
+	}`)
+
+	p := NewSpecParser()
+	specOnly, err := p.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse() error: %v", err)
+	}
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	if specOnly.Name != result.Spec.Name {
+		t.Errorf("Name mismatch: Parse=%q, ParseFull=%q", specOnly.Name, result.Spec.Name)
+	}
+	if len(specOnly.Dependencies) != len(result.Spec.Dependencies) {
+		t.Errorf("Deps count mismatch: Parse=%d, ParseFull=%d", len(specOnly.Dependencies), len(result.Spec.Dependencies))
+	}
+}
+
+func TestSpecParser_ParseFull_DependenciesSorted(t *testing.T) {
+	// Verify ParseFull sorts deps same as Parse.
+	data := []byte(`{
+		"dependencies": {
+			"zlib": "^1.0.0",
+			"axios": "^1.0.0",
+			"morgan": "^1.0.0"
+		}
+	}`)
+
+	p := NewSpecParser()
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	expected := []string{"axios", "morgan", "zlib"}
+	if len(result.Spec.Dependencies) != len(expected) {
+		t.Fatalf("Dependencies count = %d, want %d", len(result.Spec.Dependencies), len(expected))
+	}
+	for i, name := range expected {
+		if result.Spec.Dependencies[i].Name != name {
+			t.Errorf("Dependencies[%d].Name = %q, want %q", i, result.Spec.Dependencies[i].Name, name)
+		}
+	}
+}
+
+func TestSpecParser_ParseFull_DeprecatedBunOverrides(t *testing.T) {
+	// bun uses npm's overrides field - verify it's captured via NpmOverrides.
+	data := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {"foo": "^1.0.0"},
+		"overrides": {"bar": "2.0.0"}
+	}`)
+
+	p := NewSpecParser()
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	if result.NpmOverrides == nil {
+		t.Fatal("NpmOverrides should be non-nil (bun uses npm overrides field)")
+	}
+}
+
 func TestSpecParser_Parse_DependenciesSorted(t *testing.T) {
 	// Deliberately unsorted input to verify sort behavior.
 	data := []byte(`{

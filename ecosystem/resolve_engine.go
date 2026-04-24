@@ -86,6 +86,8 @@ type resolverState struct {
 	policy         ResolverPolicy
 	specDir        string // for resolving file: deps
 	workspaceIndex *WorkspaceIndex
+	overrides      *OverrideSet // version overrides from package.json
+	ancestry       []string     // current resolution chain for override matching
 }
 
 // Resolve executes the shared dependency resolution algorithm.
@@ -102,6 +104,7 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 		policy:         policy,
 		specDir:        opts.SpecDir,
 		workspaceIndex: opts.WorkspaceIndex,
+		overrides:      project.Overrides,
 	}
 
 	for _, dep := range project.Dependencies {
@@ -171,6 +174,13 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		} else {
 			actualName = aliasSpec
 			actualConstraint = "*"
+		}
+	}
+
+	// Apply version overrides before any resolution logic.
+	if s.overrides != nil {
+		if overrideVersion, ok := s.overrides.FindOverride(actualName, s.ancestry); ok {
+			actualConstraint = overrideVersion
 		}
 	}
 
@@ -420,6 +430,10 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	s.nodes[key] = node
 	s.nodeIndex.Add(actualName, node)
 	graph.Nodes[key] = node
+
+	// Push current package onto ancestry for override matching.
+	s.ancestry = append(s.ancestry, actualName)
+	defer func() { s.ancestry = s.ancestry[:len(s.ancestry)-1] }()
 
 	// Resolve transitive regular deps.
 	depNames := maputil.SortedKeys(meta.Dependencies)

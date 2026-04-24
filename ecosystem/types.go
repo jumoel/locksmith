@@ -76,6 +76,9 @@ type ProjectSpec struct {
 	// Workspaces holds workspace members for monorepo projects.
 	// Nil for single-package projects.
 	Workspaces []*WorkspaceMember
+	// Overrides holds parsed version overrides (npm overrides, pnpm overrides,
+	// yarn resolutions). Nil when no overrides are declared.
+	Overrides *OverrideSet
 }
 
 // DeclaredDep is a dependency declared in a spec file.

@@ -115,19 +115,33 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		formatter = npm.NewPackageLockV1Formatter()
 	}
 
-	var spec *ecosystem.ProjectSpec
+	var parseResult *npm.ParseResult
 	if len(opts.WorkspaceMembers) > 0 {
 		var err error
-		spec, err = parser.ParseWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
+		parseResult, err = parser.ParseFullWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
 		if err != nil {
 			return nil, fmt.Errorf("parsing workspace: %w", err)
 		}
 	} else {
 		var err error
-		spec, err = parser.Parse(opts.SpecFile)
+		parseResult, err = parser.ParseFull(opts.SpecFile)
 		if err != nil {
 			return nil, fmt.Errorf("parsing package.json: %w", err)
 		}
+	}
+	spec := parseResult.Spec
+
+	// Parse npm overrides and attach to spec.
+	if parseResult.NpmOverrides != nil {
+		rootDeps := make(map[string]string)
+		for _, dep := range spec.Dependencies {
+			rootDeps[dep.Name] = dep.Constraint
+		}
+		overrides, err := npm.ParseNpmOverrides(parseResult.NpmOverrides, rootDeps)
+		if err != nil {
+			return nil, fmt.Errorf("parsing npm overrides: %w", err)
+		}
+		spec.Overrides = overrides
 	}
 
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
@@ -203,19 +217,29 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		formatter = pnpm.NewPnpmLockV9Formatter()
 	}
 
-	var spec *ecosystem.ProjectSpec
+	var parseResult *npm.ParseResult
 	if len(opts.WorkspaceMembers) > 0 {
 		var err error
-		spec, err = parser.ParseWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
+		parseResult, err = parser.ParseFullWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
 		if err != nil {
 			return nil, fmt.Errorf("parsing workspace: %w", err)
 		}
 	} else {
 		var err error
-		spec, err = parser.Parse(opts.SpecFile)
+		parseResult, err = parser.ParseFull(opts.SpecFile)
 		if err != nil {
 			return nil, fmt.Errorf("parsing package.json: %w", err)
 		}
+	}
+	spec := parseResult.Spec
+
+	// Parse pnpm overrides and attach to spec.
+	if parseResult.PnpmOverrides != nil {
+		overrides, err := npm.ParsePnpmOverrides(parseResult.PnpmOverrides)
+		if err != nil {
+			return nil, fmt.Errorf("parsing pnpm overrides: %w", err)
+		}
+		spec.Overrides = overrides
 	}
 
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
@@ -282,19 +306,29 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 	}
 	resolver.PolicyOverride = opts.PolicyOverride
 
-	var spec *ecosystem.ProjectSpec
+	var parseResult *npm.ParseResult
 	if len(opts.WorkspaceMembers) > 0 {
 		var err error
-		spec, err = parser.ParseWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
+		parseResult, err = parser.ParseFullWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
 		if err != nil {
 			return nil, fmt.Errorf("parsing workspace: %w", err)
 		}
 	} else {
 		var err error
-		spec, err = parser.Parse(opts.SpecFile)
+		parseResult, err = parser.ParseFull(opts.SpecFile)
 		if err != nil {
 			return nil, fmt.Errorf("parsing package.json: %w", err)
 		}
+	}
+	spec := parseResult.Spec
+
+	// Parse yarn resolutions and attach to spec.
+	if parseResult.YarnResolutions != nil {
+		overrides, err := npm.ParseYarnResolutions(parseResult.YarnResolutions)
+		if err != nil {
+			return nil, fmt.Errorf("parsing yarn resolutions: %w", err)
+		}
+		spec.Overrides = overrides
 	}
 
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
@@ -351,19 +385,33 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	resolver := bun.NewResolver()
 	formatter := bun.NewBunLockFormatter()
 
-	var spec *ecosystem.ProjectSpec
+	var parseResult *npm.ParseResult
 	if len(opts.WorkspaceMembers) > 0 {
 		var err error
-		spec, err = parser.ParseWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
+		parseResult, err = parser.ParseFullWithWorkspaces(opts.SpecFile, opts.WorkspaceMembers)
 		if err != nil {
 			return nil, fmt.Errorf("parsing workspace: %w", err)
 		}
 	} else {
 		var err error
-		spec, err = parser.Parse(opts.SpecFile)
+		parseResult, err = parser.ParseFull(opts.SpecFile)
 		if err != nil {
 			return nil, fmt.Errorf("parsing package.json: %w", err)
 		}
+	}
+	spec := parseResult.Spec
+
+	// Parse npm overrides for bun (bun reads npm's overrides field).
+	if parseResult.NpmOverrides != nil {
+		rootDeps := make(map[string]string)
+		for _, dep := range spec.Dependencies {
+			rootDeps[dep.Name] = dep.Constraint
+		}
+		overrides, err := npm.ParseNpmOverrides(parseResult.NpmOverrides, rootDeps)
+		if err != nil {
+			return nil, fmt.Errorf("parsing npm overrides: %w", err)
+		}
+		spec.Overrides = overrides
 	}
 
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}

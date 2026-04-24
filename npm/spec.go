@@ -20,7 +20,11 @@ type packageJSON struct {
 		Optional bool `json:"optional"`
 	} `json:"peerDependenciesMeta,omitempty"`
 	Overrides  json.RawMessage `json:"overrides,omitempty"`
-	Workspaces json.RawMessage `json:"workspaces,omitempty"`
+	Pnpm      *struct {
+		Overrides json.RawMessage `json:"overrides,omitempty"`
+	} `json:"pnpm,omitempty"`
+	Resolutions json.RawMessage `json:"resolutions,omitempty"`
+	Workspaces  json.RawMessage `json:"workspaces,omitempty"`
 }
 
 // SpecParser parses package.json files.
@@ -86,6 +90,72 @@ func (p *SpecParser) Parse(data []byte) (*ecosystem.ProjectSpec, error) {
 	sortDeps(spec.Dependencies)
 
 	return spec, nil
+}
+
+// ParseResult holds the spec plus raw override fields for PM-specific parsing.
+type ParseResult struct {
+	Spec            *ecosystem.ProjectSpec
+	NpmOverrides    json.RawMessage
+	PnpmOverrides   json.RawMessage
+	YarnResolutions json.RawMessage
+}
+
+// ParseFull reads a package.json and returns the spec plus raw override data.
+// This lets callers parse PM-specific overrides after knowing which PM they target.
+func (p *SpecParser) ParseFull(data []byte) (*ParseResult, error) {
+	var pkg packageJSON
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return nil, fmt.Errorf("parsing package.json: %w", err)
+	}
+
+	spec, err := p.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &ParseResult{
+		Spec:            spec,
+		NpmOverrides:    pkg.Overrides,
+		YarnResolutions: pkg.Resolutions,
+	}
+	if pkg.Pnpm != nil {
+		result.PnpmOverrides = pkg.Pnpm.Overrides
+	}
+
+	return result, nil
+}
+
+// ParseFullWithWorkspaces parses a root spec with workspace members and returns raw override data.
+func (p *SpecParser) ParseFullWithWorkspaces(rootData []byte, memberData map[string][]byte) (*ParseResult, error) {
+	result, err := p.ParseFull(rootData)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(memberData) == 0 {
+		return result, nil
+	}
+
+	result.Spec.Workspaces = make([]*ecosystem.WorkspaceMember, 0, len(memberData))
+	paths := make([]string, 0, len(memberData))
+	for p := range memberData {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	for _, relPath := range paths {
+		data := memberData[relPath]
+		memberSpec, err := p.Parse(data)
+		if err != nil {
+			return nil, fmt.Errorf("parsing workspace member %s: %w", relPath, err)
+		}
+		result.Spec.Workspaces = append(result.Spec.Workspaces, &ecosystem.WorkspaceMember{
+			RelPath: relPath,
+			Spec:    memberSpec,
+		})
+	}
+
+	return result, nil
 }
 
 // sortDeps sorts declared dependencies by name, then by type.

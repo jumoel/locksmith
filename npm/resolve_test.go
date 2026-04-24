@@ -317,6 +317,124 @@ func TestResolve_CutoffDate(t *testing.T) {
 	}
 }
 
+func TestResolve_NpmOverride_Global(t *testing.T) {
+	// Override a transitive dep to a specific version.
+	// A@1.0.0 depends on B@^1.0.0. We override B to 1.0.0 (instead of 1.5.0).
+	reg := newMockRegistry()
+	reg.addVersion("A", "1.0.0", baseTime, map[string]string{"B": "^1.0.0"})
+	reg.addVersion("B", "1.0.0", baseTime, nil)
+	reg.addVersion("B", "1.5.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+		Overrides: &ecosystem.OverrideSet{
+			Rules: []ecosystem.OverrideRule{
+				{Package: "B", Version: "1.0.0"},
+			},
+		},
+	}
+
+	r := NewResolver()
+	result, err := r.ResolveWithPlacement(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// B should be 1.0.0 (overridden), not 1.5.0.
+	bPlaced, ok := result.PlacedNodes["node_modules/B"]
+	if !ok {
+		t.Fatal("B not placed")
+	}
+	if bPlaced.Node.Version != "1.0.0" {
+		t.Errorf("B version = %s, want 1.0.0 (overridden)", bPlaced.Node.Version)
+	}
+}
+
+func TestResolve_NpmOverride_Nested(t *testing.T) {
+	// Override B only when it's a dep of A, not when it's a dep of C.
+	reg := newMockRegistry()
+	reg.addVersion("A", "1.0.0", baseTime, map[string]string{"B": "^1.0.0"})
+	reg.addVersion("C", "1.0.0", baseTime, map[string]string{"B": "^1.0.0"})
+	reg.addVersion("B", "1.0.0", baseTime, nil)
+	reg.addVersion("B", "1.5.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+			{Name: "C", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+		Overrides: &ecosystem.OverrideSet{
+			Rules: []ecosystem.OverrideRule{
+				{
+					Package: "A",
+					Children: []ecosystem.OverrideRule{
+						{Package: "B", Version: "1.0.0"},
+					},
+				},
+			},
+		},
+	}
+
+	r := NewResolver()
+	result, err := r.ResolveWithPlacement(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// With cross-tree dedup enabled (npm default), the first resolution of B wins.
+	// A is resolved first (alphabetically sorted deps), and its B dep gets overridden
+	// to 1.0.0. Then when C needs B@^1.0.0, dedup kicks in and reuses B@1.0.0
+	// because 1.0.0 satisfies ^1.0.0.
+	//
+	// This is correct npm behavior: overrides affect the resolution globally once
+	// a version is pinned by the first requester.
+	bPlaced, ok := result.PlacedNodes["node_modules/B"]
+	if !ok {
+		t.Fatal("B not placed")
+	}
+	// B@1.0.0 because A's override resolved it first, and dedup reused it for C.
+	if bPlaced.Node.Version != "1.0.0" {
+		t.Errorf("B version = %s, want 1.0.0 (overridden via A, deduped for C)", bPlaced.Node.Version)
+	}
+}
+
+func TestResolve_NpmOverride_NoOverride(t *testing.T) {
+	// No overrides - should behave normally.
+	reg := newMockRegistry()
+	reg.addVersion("A", "1.0.0", baseTime, map[string]string{"B": "^1.0.0"})
+	reg.addVersion("B", "1.0.0", baseTime, nil)
+	reg.addVersion("B", "1.5.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+		// No Overrides set.
+	}
+
+	r := NewResolver()
+	result, err := r.ResolveWithPlacement(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	bPlaced, ok := result.PlacedNodes["node_modules/B"]
+	if !ok {
+		t.Fatal("B not placed")
+	}
+	if bPlaced.Node.Version != "1.5.0" {
+		t.Errorf("B version = %s, want 1.5.0 (no override, highest version)", bPlaced.Node.Version)
+	}
+}
+
 func TestResolve_OptionalDepFails(t *testing.T) {
 	reg := newMockRegistry()
 	// A has a regular dep on B and an optional dep on "missing-pkg".
