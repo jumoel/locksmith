@@ -96,7 +96,7 @@ Optional flags: `--cutoff 2025-01-01` (only resolve versions published before th
 
 *\*Yarn berry v4/v5 checksums: yarn 2/3.1 compute checksums by re-packing tarballs into their internal ZIP cache format and hashing that. This hash can't be derived from registry data alone. Lockfiles are generated without checksums; yarn fills them on first `yarn install`. Yarn 3.2+ and 4 don't validate checksums.*
 
-**Not implemented**: pnpm lockfile v1-v3 (pnpm 1-3, requires Node 4-10, zero active usage), yarn berry v1-v3 (pre-release development artifacts), yarn berry v7 (no yarn version ever produced this metadata version), npm `overrides` / pnpm `overrides` / yarn `resolutions` (version override directives).
+**Not implemented**: pnpm lockfile v1-v3 (pnpm 1-3, requires Node 4-10, zero active usage), yarn berry v1-v3 (pre-release development artifacts), yarn berry v7 (no yarn version ever produced this metadata version).
 
 ## Architecture
 
@@ -141,13 +141,14 @@ Each PM's resolver is a thin wrapper (~60-80 lines) that configures the policy a
 - **Non-registry deps**: handles `file:`, `git+`, `github:`, tarball URL, and `workspace:` specifiers with PM-correct lockfile entries
 - **Workspace/monorepo support**: resolves workspace members and cross-workspace deps (`workspace:*`, `workspace:^`), generates multi-importer lockfiles for pnpm, bun, and yarn berry
 - **Cutoff date filtering**: only resolves versions published before a given date
+- **Version overrides**: npm `overrides`, pnpm `pnpm.overrides`, and yarn `resolutions` - force specific versions for transitive dependencies
 - **Per-PM-version PolicyOverride**: callers can specify exact resolution behavior for any PM version
 
 ## Testing
 
 ### Correctness matrix
 
-800+ tests across 24 package manager versions and 51 fixtures, comparing resolved versions against what each real package manager produces (via Docker):
+850+ tests across 24 package manager versions and 53 fixtures, comparing resolved versions against what each real package manager produces (via Docker):
 
 | PM versions tested | Fixtures |
 |---|---|
@@ -183,12 +184,13 @@ steps:
 
 ## Test fixtures
 
-51 package.json fixtures covering:
+53 package.json fixtures covering:
 
 - **Core patterns**: minimal, transitive, diamond, multi-dep, dev-deps, pinned, scoped, zero-deps
 - **Framework versions**: React 15-19, Next.js 12-15, TypeScript 4-5
 - **Large packages**: express, webpack, styled-components, eslint
 - **Edge cases**: conflicting version ranges, optional missing deps, circular peer deps, deprecated packages, platform-specific deps, aliased deps, non-registry deps, bundled deps
+- **Overrides**: npm overrides, yarn resolutions forcing transitive dep versions
 - **Workspaces**: simple monorepo, cross-workspace deps with `workspace:*` and `workspace:^`
 - **Arborist test suite**: dedupe, dev-deps, peer-cycle, optional-missing, peer-optional (using real @isaacs/ test packages)
 - **Package managers as deps**: npm 6/10, pnpm 8/9, yarn classic
