@@ -71,6 +71,7 @@ var workspaceCorrectnessMatrix = []correctnessCase{
 // workspaceFixtures lists the workspace fixture directories to test.
 var workspaceFixtures = []string{
 	"workspace-simple",
+	"workspace-npm-style",
 }
 
 // TestWorkspaceCorrectness generates workspace lockfiles with both locksmith
@@ -84,6 +85,10 @@ func TestWorkspaceCorrectness(t *testing.T) {
 			for _, fixture := range workspaceFixtures {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
+					// pnpm requires workspace: protocol for cross-workspace deps.
+					if fixture == "workspace-npm-style" && strings.HasPrefix(cc.PMLabel, "pnpm") {
+						t.Skip("pnpm requires workspace: protocol for cross-workspace deps")
+					}
 					t.Parallel()
 					compareWorkspaceResolution(t, cc, fixture)
 				})
@@ -215,6 +220,10 @@ func TestWorkspaceAcceptance(t *testing.T) {
 			for _, fixture := range workspaceFixtures {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
+					// pnpm requires workspace: protocol for cross-workspace deps.
+					if fixture == "workspace-npm-style" && vc.PMName == "pnpm" {
+						t.Skip("pnpm requires workspace: protocol for cross-workspace deps")
+					}
 					t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion
 					t.Run(pmTag, func(t *testing.T) {

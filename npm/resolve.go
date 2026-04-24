@@ -47,9 +47,10 @@ func (r *Resolver) Resolve(ctx context.Context, project *ecosystem.ProjectSpec, 
 // hoisted placement in the node_modules tree.
 func (r *Resolver) ResolveWithPlacement(ctx context.Context, project *ecosystem.ProjectSpec, registry ecosystem.Registry, opts ecosystem.ResolveOptions) (*ResolveResult, error) {
 	policy := ecosystem.ResolverPolicy{
-		CrossTreeDedup:      true,
-		AutoInstallPeers:    true,
-		StorePeerMetaOnNode: true,
+		CrossTreeDedup:         true,
+		AutoInstallPeers:       true,
+		StorePeerMetaOnNode:    true,
+		ResolveWorkspaceByName: true,
 	}
 	policy.ApplyOverride(r.PolicyOverride)
 

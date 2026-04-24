@@ -18,6 +18,10 @@ type Resolver struct {
 	// the default (VersionSelectPreferLatest); yarn berry uses VersionSelectHighest.
 	VersionSelection ecosystem.VersionSelection
 
+	// ResolveWorkspaceByName: when true, resolve regular semver constraints to
+	// workspace members by name match. Yarn classic uses this; berry does not.
+	ResolveWorkspaceByName bool
+
 	// PolicyOverride, if set, overrides the default resolution policy.
 	PolicyOverride *ecosystem.ResolverPolicy
 }
@@ -25,7 +29,7 @@ type Resolver struct {
 // NewResolver returns a new yarn dependency resolver with default settings.
 // Defaults to no peer auto-install (yarn classic behavior).
 func NewResolver() *Resolver {
-	return &Resolver{AutoInstallPeers: false}
+	return &Resolver{AutoInstallPeers: false, ResolveWorkspaceByName: true}
 }
 
 // NewBerryResolver returns a yarn resolver with peer auto-install enabled
@@ -66,9 +70,10 @@ func (r *Resolver) ResolveForLockfile(ctx context.Context, project *ecosystem.Pr
 	packages := make(map[string]*ResolvedPackage)
 
 	policy := ecosystem.ResolverPolicy{
-		CrossTreeDedup:   false, // yarn resolves each constraint independently
-		AutoInstallPeers: r.AutoInstallPeers,
-		VersionSelection: r.VersionSelection,
+		CrossTreeDedup:         false, // yarn resolves each constraint independently
+		AutoInstallPeers:       r.AutoInstallPeers,
+		VersionSelection:       r.VersionSelection,
+		ResolveWorkspaceByName: r.ResolveWorkspaceByName,
 	}
 	policy.ApplyOverride(r.PolicyOverride)
 	// OnNodeResolved is always set by this resolver, never overridden.

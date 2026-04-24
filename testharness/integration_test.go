@@ -180,26 +180,28 @@ func TestIntegration(t *testing.T) {
 						}
 					}
 					// Skip workspace fixtures based on PM workspace: protocol support.
-					// The fixtures use pnpm/berry-style workspace: protocol in member
-					// package.json files. PMs that don't understand this protocol will
-					// reject the package.json during install regardless of lockfile content.
 					if strings.HasPrefix(fixture, "workspace-") {
-						// npm doesn't support workspace: protocol in package.json deps.
-						// npm workspaces use regular version ranges resolved via the
-						// workspaces field - a different mechanism.
-						if vc.PMName == "npm" {
-							t.Skip("npm doesn't support workspace: protocol in package.json")
+						// Fixtures using workspace: protocol can't be tested with PMs that don't support it.
+						usesWorkspaceProtocol := fixture == "workspace-simple" || fixture == "workspace-cross-deps"
+						if usesWorkspaceProtocol {
+							if vc.PMName == "npm" {
+								t.Skip("npm doesn't support workspace: protocol in package.json")
+							}
+							if vc.PMName == "yarn" && vc.PMVersion == "1" {
+								t.Skip("yarn classic doesn't support workspace: protocol")
+							}
+							if vc.PMName == "yarn" && vc.PMVersion == "2" && fixture == "workspace-cross-deps" {
+								t.Skip("yarn 2 doesn't support workspace:^ protocol")
+							}
+						}
+						// npm-style fixtures (regular semver ranges) don't work with pnpm (needs workspace: protocol).
+						if fixture == "workspace-npm-style" {
+							if vc.PMName == "pnpm" {
+								t.Skip("pnpm requires workspace: protocol for cross-workspace deps")
+							}
 						}
 						if vc.PMName == "pnpm" && vc.PMVersion == "4" {
 							t.Skip("pnpm 4 doesn't support workspaces")
-						}
-						// yarn classic (v1) doesn't understand workspace: protocol.
-						if vc.PMName == "yarn" && vc.PMVersion == "1" {
-							t.Skip("yarn classic doesn't support workspace: protocol")
-						}
-						// yarn 2 doesn't support workspace:^ (only workspace:*).
-						if vc.PMName == "yarn" && vc.PMVersion == "2" && fixture == "workspace-cross-deps" {
-							t.Skip("yarn 2 doesn't support workspace:^ protocol")
 						}
 					}
 					t.Parallel()

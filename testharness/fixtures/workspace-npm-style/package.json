@@ -1,0 +1,9 @@
+{
+  "name": "workspace-npm-style",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "is-odd": "^3.0.0"
+  }
+}

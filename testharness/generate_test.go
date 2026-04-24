@@ -58,6 +58,13 @@ func TestGenerate(t *testing.T) {
 				fixture := fixture
 				t.Run(fixture, func(t *testing.T) {
 					t.Parallel()
+
+					// workspace-npm-style uses regular semver for cross-workspace deps.
+					// Only npm and yarn classic resolve these by name match.
+					if fixture == "workspace-npm-style" && tc.Ecosystem != "npm" && tc.Format != locksmith.FormatYarnClassic {
+						t.Skip("workspace-npm-style requires resolve-by-name (npm/yarn classic only)")
+					}
+
 					specData := readFixture(t, fixture)
 					fixtureDir := filepath.Join("fixtures", fixture)
 

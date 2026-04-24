@@ -55,6 +55,12 @@ type ResolverPolicy struct {
 	// (VersionSelectPreferLatest) is the safe default for most PMs.
 	VersionSelection VersionSelection
 
+	// ResolveWorkspaceByName: when true and a workspace index is available,
+	// resolve regular semver constraints to workspace members if the dep name
+	// matches a member. This is npm and yarn classic behavior where cross-workspace
+	// deps use regular version ranges, not the workspace: protocol.
+	ResolveWorkspaceByName bool
+
 	// OnNodeResolved is called after each node is fully resolved including
 	// all transitive deps. PM-specific resolvers use this to collect their
 	// own bookkeeping data.
@@ -72,6 +78,7 @@ func (p *ResolverPolicy) ApplyOverride(override *ResolverPolicy) {
 	p.StorePeerMetaOnNode = override.StorePeerMetaOnNode
 	p.SkipOptionalPeerDeps = override.SkipOptionalPeerDeps
 	p.VersionSelection = override.VersionSelection
+	p.ResolveWorkspaceByName = override.ResolveWorkspaceByName
 }
 
 // resolverState holds state during resolution.
@@ -190,34 +197,14 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		if member == nil {
 			return nil, fmt.Errorf("workspace member %q not found in workspace index", actualName)
 		}
-		key := member.Spec.Name + "@" + member.Spec.Version
-		// Prevent infinite recursion for circular workspace deps.
-		if s.resolving[key] {
-			node := &Node{Name: member.Spec.Name, Version: member.Spec.Version, WorkspacePath: member.RelPath}
-			return node, nil
+		return s.resolveWorkspaceMember(graph, member)
+	}
+
+	// npm/yarn-classic: resolve regular constraints to workspace members by name.
+	if s.policy.ResolveWorkspaceByName && s.workspaceIndex != nil {
+		if member := s.workspaceIndex.Resolve(actualName); member != nil {
+			return s.resolveWorkspaceMember(graph, member)
 		}
-		if node, ok := s.nodes[key]; ok {
-			return node, nil
-		}
-		s.resolving[key] = true
-		node := &Node{Name: member.Spec.Name, Version: member.Spec.Version, WorkspacePath: member.RelPath}
-		s.nodes[key] = node
-		// Resolve the workspace member's own dependencies.
-		for _, dep := range member.Spec.Dependencies {
-			child, err := s.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
-			if err != nil {
-				if dep.Type == DepOptional {
-					continue
-				}
-				delete(s.resolving, key)
-				return nil, fmt.Errorf("resolving %s@%s (workspace member %s): %w", dep.Name, dep.Constraint, member.RelPath, err)
-			}
-			node.Dependencies = append(node.Dependencies, &Edge{
-				Name: dep.Name, Constraint: dep.Constraint, Target: child, Type: dep.Type,
-			})
-		}
-		delete(s.resolving, key)
-		return node, nil
 	}
 
 	// Detect non-registry dependency specifiers (file:, git+, github:, etc.).
@@ -518,6 +505,39 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		s.policy.OnNodeResolved(key, node, meta, node.Dependencies)
 	}
 
+	return node, nil
+}
+
+// resolveWorkspaceMember resolves a dependency to a local workspace member.
+// Handles cycle detection, node caching, and recursive member dep resolution.
+func (s *resolverState) resolveWorkspaceMember(graph *Graph, member *WorkspaceMember) (*Node, error) {
+	key := member.Spec.Name + "@" + member.Spec.Version
+	// Prevent infinite recursion for circular workspace deps.
+	if s.resolving[key] {
+		node := &Node{Name: member.Spec.Name, Version: member.Spec.Version, WorkspacePath: member.RelPath}
+		return node, nil
+	}
+	if node, ok := s.nodes[key]; ok {
+		return node, nil
+	}
+	s.resolving[key] = true
+	node := &Node{Name: member.Spec.Name, Version: member.Spec.Version, WorkspacePath: member.RelPath}
+	s.nodes[key] = node
+	// Resolve the workspace member's own dependencies.
+	for _, dep := range member.Spec.Dependencies {
+		child, err := s.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
+		if err != nil {
+			if dep.Type == DepOptional {
+				continue
+			}
+			delete(s.resolving, key)
+			return nil, fmt.Errorf("resolving %s@%s (workspace member %s): %w", dep.Name, dep.Constraint, member.RelPath, err)
+		}
+		node.Dependencies = append(node.Dependencies, &Edge{
+			Name: dep.Name, Constraint: dep.Constraint, Target: child, Type: dep.Type,
+		})
+	}
+	delete(s.resolving, key)
 	return node, nil
 }
 

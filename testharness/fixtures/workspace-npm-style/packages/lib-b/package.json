@@ -1,0 +1,8 @@
+{
+  "name": "@wsnpm/lib-b",
+  "version": "1.0.0",
+  "dependencies": {
+    "@wsnpm/lib-a": "^1.0.0",
+    "is-number": "^7.0.0"
+  }
+}

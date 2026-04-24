@@ -175,6 +175,76 @@ func TestWorkspaceGenerate_CrossDeps(t *testing.T) {
 	}
 }
 
+// npmStyleFormats lists the formats that resolve cross-workspace deps by name
+// (regular semver) rather than requiring workspace: protocol.
+var npmStyleFormats = []struct {
+	name   string
+	format locksmith.OutputFormat
+}{
+	{"PackageLockV3", locksmith.FormatPackageLockV3},
+	{"YarnClassic", locksmith.FormatYarnClassic},
+}
+
+func TestWorkspaceGenerate_NpmStyle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping workspace generation test in short mode")
+	}
+
+	rootData, members := readWorkspaceFixture(t, "workspace-npm-style", []string{
+		"packages/lib-a",
+		"packages/lib-b",
+	})
+
+	for _, tc := range npmStyleFormats {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			result, err := locksmith.Generate(ctx, locksmith.GenerateOptions{
+				SpecFile:         rootData,
+				OutputFormat:     tc.format,
+				WorkspaceMembers: members,
+			})
+			if err != nil {
+				if isWorkspaceNotImplementedError(err) {
+					t.Skipf("workspace support not yet implemented for %s: %v", tc.name, err)
+				}
+				t.Fatalf("Generate(%s) failed: %v", tc.name, err)
+			}
+
+			output := string(result.Lockfile)
+			if len(output) == 0 {
+				t.Fatal("generated empty lockfile")
+			}
+
+			// Workspace member names should appear in the output.
+			for _, name := range []string{"@wsnpm/lib-a", "@wsnpm/lib-b"} {
+				if !strings.Contains(output, name) {
+					t.Errorf("output missing workspace member %q", name)
+				}
+			}
+
+			// External dependencies should appear in the output.
+			for _, dep := range []string{"ms", "is-number"} {
+				if !strings.Contains(output, dep) {
+					t.Errorf("output missing external dependency %q", dep)
+				}
+			}
+
+			// The cross-workspace dep @wsnpm/lib-a should be resolved as a workspace
+			// link, not fetched from the registry. Check that no registry tarball URL
+			// for @wsnpm/lib-a appears in the output.
+			if strings.Contains(output, "registry.npmjs.org/%40wsnpm%2Flib-a") ||
+				strings.Contains(output, "registry.npmjs.org/@wsnpm/lib-a") {
+				t.Error("@wsnpm/lib-a resolved from registry instead of workspace link")
+			}
+
+			t.Logf("generated %d bytes for workspace-npm-style/%s", len(result.Lockfile), tc.name)
+		})
+	}
+}
+
 func TestWorkspaceGenerate_SinglePackageFallback(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping workspace generation test in short mode")
