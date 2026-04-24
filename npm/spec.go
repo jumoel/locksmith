@@ -21,8 +21,9 @@ type packageJSON struct {
 	} `json:"peerDependenciesMeta,omitempty"`
 	Overrides  json.RawMessage `json:"overrides,omitempty"`
 	Pnpm *struct {
-		Overrides         json.RawMessage `json:"overrides,omitempty"`
-		PackageExtensions json.RawMessage `json:"packageExtensions,omitempty"`
+		Overrides            json.RawMessage `json:"overrides,omitempty"`
+		PackageExtensions    json.RawMessage `json:"packageExtensions,omitempty"`
+		PeerDependencyRules  json.RawMessage `json:"peerDependencyRules,omitempty"`
 	} `json:"pnpm,omitempty"`
 	Resolutions json.RawMessage `json:"resolutions,omitempty"`
 	Workspaces  json.RawMessage `json:"workspaces,omitempty"`
@@ -95,11 +96,12 @@ func (p *SpecParser) Parse(data []byte) (*ecosystem.ProjectSpec, error) {
 
 // ParseResult holds the spec plus raw override fields for PM-specific parsing.
 type ParseResult struct {
-	Spec                  *ecosystem.ProjectSpec
-	NpmOverrides          json.RawMessage
-	PnpmOverrides         json.RawMessage
-	YarnResolutions       json.RawMessage
-	PnpmPackageExtensions json.RawMessage
+	Spec                     *ecosystem.ProjectSpec
+	NpmOverrides             json.RawMessage
+	PnpmOverrides            json.RawMessage
+	YarnResolutions          json.RawMessage
+	PnpmPackageExtensions    json.RawMessage
+	PnpmPeerDependencyRules  json.RawMessage
 }
 
 // ParseFull reads a package.json and returns the spec plus raw override data.
@@ -123,6 +125,7 @@ func (p *SpecParser) ParseFull(data []byte) (*ParseResult, error) {
 	if pkg.Pnpm != nil {
 		result.PnpmOverrides = pkg.Pnpm.Overrides
 		result.PnpmPackageExtensions = pkg.Pnpm.PackageExtensions
+		result.PnpmPeerDependencyRules = pkg.Pnpm.PeerDependencyRules
 	}
 
 	return result, nil

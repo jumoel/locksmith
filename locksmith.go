@@ -251,6 +251,15 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		spec.PackageExtensions = extensions
 	}
 
+	// Parse pnpm peerDependencyRules and attach to spec.
+	if parseResult.PnpmPeerDependencyRules != nil {
+		rules, err := npm.ParsePeerDependencyRules(parseResult.PnpmPeerDependencyRules)
+		if err != nil {
+			return nil, fmt.Errorf("parsing pnpm peerDependencyRules: %w", err)
+		}
+		spec.PeerDependencyRules = rules
+	}
+
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)

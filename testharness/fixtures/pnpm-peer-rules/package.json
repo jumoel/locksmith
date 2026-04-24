@@ -1,0 +1,12 @@
+{
+  "name": "locksmith-test-pnpm-peer-rules",
+  "version": "1.0.0",
+  "dependencies": {
+    "react-dom": "^18.0.0"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "ignoreMissing": ["react"]
+    }
+  }
+}

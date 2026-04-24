@@ -83,6 +83,21 @@ type ProjectSpec struct {
 	// additional dependencies into packages at resolution time.
 	// Nil when no extensions are declared.
 	PackageExtensions *PackageExtensionSet
+	// PeerDependencyRules holds parsed pnpm peerDependencyRules that control
+	// peer dep resolution behavior. Nil when no rules are declared.
+	PeerDependencyRules *PeerDependencyRules
+}
+
+// PeerDependencyRules controls peer dep resolution behavior (pnpm feature).
+type PeerDependencyRules struct {
+	// IgnoreMissing lists glob patterns for peer deps to treat as optional.
+	// Matching peers are skipped during auto-install.
+	IgnoreMissing []string
+	// AllowedVersions overrides peer dep version constraints.
+	// Key is package name, value is the allowed version range.
+	AllowedVersions map[string]string
+	// AllowAny lists package names to skip version conflict checks for.
+	AllowAny []string
 }
 
 // DeclaredDep is a dependency declared in a spec file.

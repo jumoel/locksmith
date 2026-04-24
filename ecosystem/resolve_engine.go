@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -95,6 +96,7 @@ type resolverState struct {
 	workspaceIndex    *WorkspaceIndex
 	overrides         *OverrideSet         // version overrides from package.json
 	packageExtensions *PackageExtensionSet // pnpm packageExtensions
+	peerDepRules      *PeerDependencyRules // pnpm peerDependencyRules
 	ancestry          []string             // current resolution chain for override matching
 }
 
@@ -114,6 +116,7 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 		workspaceIndex:    opts.WorkspaceIndex,
 		overrides:         project.Overrides,
 		packageExtensions: project.PackageExtensions,
+		peerDepRules:      project.PeerDependencyRules,
 	}
 
 	for _, dep := range project.Dependencies {
@@ -486,6 +489,10 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 			if pm, ok := meta.PeerDepsMeta[depName]; ok && pm.Optional {
 				continue
 			}
+			// Skip peers matching peerDependencyRules.ignoreMissing patterns.
+			if s.peerDepRules != nil && s.matchesIgnoreMissing(depName) {
+				continue
+			}
 			// Skip if provided by the project.
 			if s.projectDeps[depName] {
 				continue
@@ -495,6 +502,12 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 				continue
 			}
 			depConstraint := meta.PeerDeps[depName]
+			// Apply peerDependencyRules.allowedVersions constraint override.
+			if s.peerDepRules != nil {
+				if allowed, ok := s.peerDepRules.AllowedVersions[depName]; ok {
+					depConstraint = allowed
+				}
+			}
 			child, err := s.resolveDep(graph, depName, depConstraint, DepPeer)
 			if err != nil {
 				continue
@@ -684,6 +697,17 @@ func isNonRegistrySpecifier(constraint string) bool {
 	}
 	for _, p := range nonRegistryPrefixes {
 		if strings.HasPrefix(constraint, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesIgnoreMissing returns true if depName matches any pattern in
+// peerDependencyRules.ignoreMissing. Patterns support path.Match glob syntax.
+func (s *resolverState) matchesIgnoreMissing(depName string) bool {
+	for _, pattern := range s.peerDepRules.IgnoreMissing {
+		if matched, _ := path.Match(pattern, depName); matched {
 			return true
 		}
 	}

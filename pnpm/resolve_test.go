@@ -47,6 +47,26 @@ func (m *mockRegistry) addVersionFull(name, version string, published time.Time,
 	pkg.times[version] = published
 }
 
+func (m *mockRegistry) addVersionWithPeers(name, version string, published time.Time, deps, peerDeps map[string]string) {
+	pkg, ok := m.packages[name]
+	if !ok {
+		pkg = &mockPackage{
+			versions: make(map[string]*ecosystem.VersionMetadata),
+			times:    make(map[string]time.Time),
+		}
+		m.packages[name] = pkg
+	}
+	pkg.versions[version] = &ecosystem.VersionMetadata{
+		Name:         name,
+		Version:      version,
+		Integrity:    fmt.Sprintf("sha512-fake-%s-%s", name, version),
+		TarballURL:   fmt.Sprintf("https://registry.npmjs.org/%s/-/%s-%s.tgz", name, name, version),
+		Dependencies: deps,
+		PeerDeps:     peerDeps,
+	}
+	pkg.times[version] = published
+}
+
 func (m *mockRegistry) FetchVersions(ctx context.Context, name string, cutoff *time.Time) ([]ecosystem.VersionInfo, error) {
 	pkg, ok := m.packages[name]
 	if !ok {
@@ -312,5 +332,143 @@ func TestPnpmResolve_PackageExtensions_VersionRange(t *testing.T) {
 	// C should be in the graph.
 	if _, ok := result.Packages["C@1.0.0"]; !ok {
 		t.Error("C@1.0.0 not in packages map - extension not applied for B@2.0.0")
+	}
+}
+
+func TestPnpmResolve_PeerDependencyRules_IgnoreMissing(t *testing.T) {
+	// Setup: A@1.0.0 has a non-optional peer dep on B.
+	// Without rules, B would be auto-installed.
+	// With ignoreMissing: ["B"], B should NOT be auto-installed.
+	reg := newMockRegistry()
+	reg.addVersionWithPeers("A", "1.0.0", baseTime, nil, map[string]string{"B": "^1.0.0"})
+	reg.addVersion("B", "1.0.0", baseTime, nil)
+
+	// First: verify B IS auto-installed without rules.
+	projectNoRules := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	r := NewResolver()
+	resultNoRules, err := r.ResolveForLockfile(context.Background(), projectNoRules, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error (no rules): %v", err)
+	}
+	if _, ok := resultNoRules.Packages["B@1.0.0"]; !ok {
+		t.Fatal("baseline check failed: B@1.0.0 should be auto-installed without rules")
+	}
+
+	// Now: with ignoreMissing, B should NOT be auto-installed.
+	projectWithRules := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+		PeerDependencyRules: &ecosystem.PeerDependencyRules{
+			IgnoreMissing: []string{"B"},
+		},
+	}
+
+	resultWithRules, err := r.ResolveForLockfile(context.Background(), projectWithRules, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error (with rules): %v", err)
+	}
+	if _, ok := resultWithRules.Packages["B@1.0.0"]; ok {
+		t.Error("B@1.0.0 should NOT be auto-installed when ignoreMissing includes 'B'")
+	}
+}
+
+func TestPnpmResolve_PeerDependencyRules_IgnoreMissing_Glob(t *testing.T) {
+	// Setup: A@1.0.0 has non-optional peer deps on @babel/core and @babel/parser.
+	// With ignoreMissing: ["@babel/*"], both should be skipped.
+	reg := newMockRegistry()
+	reg.addVersionWithPeers("A", "1.0.0", baseTime, nil, map[string]string{
+		"@babel/core":   "^7.0.0",
+		"@babel/parser": "^7.0.0",
+	})
+	reg.addVersion("@babel/core", "7.0.0", baseTime, nil)
+	reg.addVersion("@babel/parser", "7.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+		PeerDependencyRules: &ecosystem.PeerDependencyRules{
+			IgnoreMissing: []string{"@babel/*"},
+		},
+	}
+
+	r := NewResolver()
+	result, err := r.ResolveForLockfile(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, ok := result.Packages["@babel/core@7.0.0"]; ok {
+		t.Error("@babel/core should NOT be auto-installed when ignoreMissing includes '@babel/*'")
+	}
+	if _, ok := result.Packages["@babel/parser@7.0.0"]; ok {
+		t.Error("@babel/parser should NOT be auto-installed when ignoreMissing includes '@babel/*'")
+	}
+}
+
+func TestPnpmResolve_PeerDependencyRules_AllowedVersions(t *testing.T) {
+	// Setup: A@1.0.0 has peer dep on B with constraint "^1.0.0".
+	// B exists at versions 1.0.0 and 2.0.0.
+	// Without rules: B@1.0.0 would be installed (matches ^1.0.0).
+	// With allowedVersions: {"B": "^2.0.0"}: B@2.0.0 should be installed.
+	reg := newMockRegistry()
+	reg.addVersionWithPeers("A", "1.0.0", baseTime, nil, map[string]string{"B": "^1.0.0"})
+	reg.addVersion("B", "1.0.0", baseTime, nil)
+	reg.addVersion("B", "2.0.0", baseTime.Add(24*time.Hour), nil)
+
+	// Baseline: without rules, B@1.0.0 is chosen (^1.0.0 picks latest in 1.x).
+	projectNoRules := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	r := NewResolver()
+	resultNoRules, err := r.ResolveForLockfile(context.Background(), projectNoRules, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error (no rules): %v", err)
+	}
+	if _, ok := resultNoRules.Packages["B@1.0.0"]; !ok {
+		t.Fatal("baseline check failed: B@1.0.0 should be auto-installed with ^1.0.0 constraint")
+	}
+	if _, ok := resultNoRules.Packages["B@2.0.0"]; ok {
+		t.Fatal("baseline check failed: B@2.0.0 should NOT be auto-installed with ^1.0.0 constraint")
+	}
+
+	// With allowedVersions: B constraint overridden to ^2.0.0.
+	projectWithRules := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+		PeerDependencyRules: &ecosystem.PeerDependencyRules{
+			AllowedVersions: map[string]string{"B": "^2.0.0"},
+		},
+	}
+
+	resultWithRules, err := r.ResolveForLockfile(context.Background(), projectWithRules, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error (with rules): %v", err)
+	}
+	if _, ok := resultWithRules.Packages["B@2.0.0"]; !ok {
+		t.Error("B@2.0.0 should be auto-installed when allowedVersions overrides constraint to ^2.0.0")
+	}
+	if _, ok := resultWithRules.Packages["B@1.0.0"]; ok {
+		t.Error("B@1.0.0 should NOT be present when allowedVersions overrides constraint to ^2.0.0")
 	}
 }
