@@ -129,6 +129,7 @@ All package managers share a single `ecosystem.Resolve()` function. Behavioral d
 | CrossTreeDedup | true | true | false | false | true |
 | AutoInstallPeers | true | true | false | true | true |
 | StorePeerMetaOnNode | true | false | false | false | false |
+| ResolveWorkspaceByName | true | false | true | false | false |
 
 Each PM's resolver is a thin wrapper (~60-80 lines) that configures the policy and collects PM-specific metadata via the `OnNodeResolved` callback. npm additionally runs a BFS hoisting/placement phase after resolution.
 
@@ -142,13 +143,14 @@ Each PM's resolver is a thin wrapper (~60-80 lines) that configures the policy a
 - **Workspace/monorepo support**: resolves workspace members and cross-workspace deps (`workspace:*`, `workspace:^`), generates multi-importer lockfiles for pnpm, bun, and yarn berry
 - **Cutoff date filtering**: only resolves versions published before a given date
 - **Version overrides**: npm `overrides`, pnpm `pnpm.overrides`, and yarn `resolutions` - force specific versions for transitive dependencies
+- **pnpm extensions**: `pnpm.packageExtensions` to inject missing deps into packages, `pnpm.peerDependencyRules` to control peer dep resolution (ignoreMissing, allowedVersions)
 - **Per-PM-version PolicyOverride**: callers can specify exact resolution behavior for any PM version
 
 ## Testing
 
 ### Correctness matrix
 
-850+ tests across 24 package manager versions and 53 fixtures, comparing resolved versions against what each real package manager produces (via Docker):
+900+ tests across 24 package manager versions and 56 fixtures, comparing resolved versions against what each real package manager produces (via Docker):
 
 | PM versions tested | Fixtures |
 |---|---|
@@ -184,14 +186,15 @@ steps:
 
 ## Test fixtures
 
-53 package.json fixtures covering:
+56 package.json fixtures covering:
 
 - **Core patterns**: minimal, transitive, diamond, multi-dep, dev-deps, pinned, scoped, zero-deps
 - **Framework versions**: React 15-19, Next.js 12-15, TypeScript 4-5
 - **Large packages**: express, webpack, styled-components, eslint
 - **Edge cases**: conflicting version ranges, optional missing deps, circular peer deps, deprecated packages, platform-specific deps, aliased deps, non-registry deps, bundled deps
 - **Overrides**: npm overrides, yarn resolutions forcing transitive dep versions
-- **Workspaces**: simple monorepo, cross-workspace deps with `workspace:*` and `workspace:^`
+- **pnpm extensions**: packageExtensions injecting deps, peerDependencyRules controlling peer resolution
+- **Workspaces**: simple monorepo, cross-workspace deps with `workspace:*`, `workspace:^`, and npm-style semver ranges
 - **Arborist test suite**: dedupe, dev-deps, peer-cycle, optional-missing, peer-optional (using real @isaacs/ test packages)
 - **Package managers as deps**: npm 6/10, pnpm 8/9, yarn classic
 
