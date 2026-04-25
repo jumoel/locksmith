@@ -227,6 +227,45 @@ func TestGenerateCmd_WorkspaceAutoDiscovery(t *testing.T) {
 	}
 }
 
+func TestGenerateCmd_NodeVersionFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real generation test in short mode")
+	}
+
+	tmp := t.TempDir()
+	specFile := filepath.Join(tmp, "package.json")
+	spec := `{"name":"test","version":"1.0.0","dependencies":{"is-odd":"^3.0.0"}}`
+	if err := os.WriteFile(specFile, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outputFile := filepath.Join(tmp, "bun.lock")
+
+	root := rootCmd()
+	root.SetArgs([]string{
+		"generate",
+		"--spec", specFile,
+		"--format", "bun-lock",
+		"--output", outputFile,
+		"--node-version", "18.0.0",
+	})
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("generate command with --node-version failed: %v", err)
+	}
+
+	info, err := os.Stat(outputFile)
+	if err != nil {
+		t.Fatalf("output file does not exist: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("output file is empty")
+	}
+}
+
 func TestGenerateCmd_PnpmWorkspaceYaml(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping pnpm workspace yaml test in short mode (needs real registry)")

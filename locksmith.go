@@ -144,7 +144,7 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		spec.Overrides = overrides
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
 	}
@@ -260,7 +260,7 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		spec.PeerDependencyRules = rules
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
 	}
@@ -349,7 +349,7 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		spec.Overrides = overrides
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
 	}
@@ -432,7 +432,7 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		spec.Overrides = overrides
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
 	}

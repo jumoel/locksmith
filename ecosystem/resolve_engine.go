@@ -98,11 +98,21 @@ type resolverState struct {
 	packageExtensions *PackageExtensionSet // pnpm packageExtensions
 	peerDepRules      *PeerDependencyRules // pnpm peerDependencyRules
 	ancestry          []string             // current resolution chain for override matching
+	nodeVersion       *semver.Version      // target Node.js version for engines filtering
 }
 
 // Resolve executes the shared dependency resolution algorithm.
 // PM-specific data is collected via the policy.OnNodeResolved callback.
 func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts ResolveOptions, policy ResolverPolicy) (*Graph, error) {
+	var nodeVer *semver.Version
+	if opts.NodeVersion != "" {
+		var err error
+		nodeVer, err = semver.Parse(opts.NodeVersion)
+		if err != nil {
+			return nil, fmt.Errorf("parsing node version %q: %w", opts.NodeVersion, err)
+		}
+	}
+
 	state := &resolverState{
 		registry:          registry,
 		cutoff:            opts.CutoffDate,
@@ -117,6 +127,7 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 		overrides:         project.Overrides,
 		packageExtensions: project.PackageExtensions,
 		peerDepRules:      project.PeerDependencyRules,
+		nodeVersion:       nodeVer,
 	}
 
 	for _, dep := range project.Dependencies {
@@ -352,11 +363,12 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	// Version picking strategy: yarn berry uses highest satisfying version;
 	// npm/pnpm/bun/yarn classic prefer the "latest" dist-tag per npm-pick-manifest.
 	var best *semver.Version
+	var distTags map[string]string
 	switch s.policy.VersionSelection {
 	case VersionSelectHighest:
 		best = semver.MaxSatisfying(parsed, c)
 	default: // VersionSelectPreferLatest
-		distTags, _ := s.registry.FetchDistTags(s.ctx, actualName)
+		distTags, _ = s.registry.FetchDistTags(s.ctx, actualName)
 		best = semver.PickVersion(parsed, c, distTags["latest"])
 	}
 	if best == nil {
@@ -385,6 +397,31 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	meta, err := s.registry.FetchMetadata(s.ctx, actualName, version)
 	if err != nil {
 		return nil, fmt.Errorf("fetching metadata for %s@%s: %w", actualName, version, err)
+	}
+
+	// Check engines.node compatibility. If the selected version is incompatible
+	// with the target Node.js version, try remaining candidates in descending
+	// order. If no compatible version exists, use the original best (npm behavior:
+	// engines is advisory, not a hard failure).
+	if s.nodeVersion != nil && !s.checkEngines(meta) {
+		fallback := s.findEngineCompatibleVersion(parsed, c, versionMap, distTags, actualName, best)
+		if fallback != nil {
+			// Switch to the compatible version.
+			delete(s.resolving, key)
+			version = versionMap[fallback.String()]
+			key = actualName + "@" + version
+			if node, ok := s.nodes[key]; ok {
+				return node, nil
+			}
+			s.resolving[key] = true
+			// Re-fetch metadata for the new version.
+			meta, err = s.registry.FetchMetadata(s.ctx, actualName, version)
+			if err != nil {
+				return nil, fmt.Errorf("fetching metadata for %s@%s: %w", actualName, version, err)
+			}
+		}
+		// If fallback is nil, all versions are incompatible. Keep the original
+		// best version (npm advisory behavior).
 	}
 
 	// Apply packageExtensions to inject additional deps before building the node.
@@ -524,6 +561,64 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	}
 
 	return node, nil
+}
+
+// checkEngines returns true if the metadata's engines.node constraint is
+// compatible with the target Node.js version. Returns true when there is no
+// target version, no engines field, or the constraint can't be parsed (lenient).
+func (s *resolverState) checkEngines(meta *VersionMetadata) bool {
+	if s.nodeVersion == nil {
+		return true
+	}
+	nodeConstraintStr, ok := meta.Engines["node"]
+	if !ok || nodeConstraintStr == "" {
+		return true
+	}
+	nodeConstraint, err := semver.ParseConstraint(nodeConstraintStr)
+	if err != nil {
+		// Unparseable constraint - be lenient, treat as compatible.
+		return true
+	}
+	return nodeConstraint.Check(s.nodeVersion)
+}
+
+// findEngineCompatibleVersion iterates candidates (excluding skip) in
+// descending order and returns the first version whose engines.node is
+// compatible with the target. Returns nil if none are compatible.
+func (s *resolverState) findEngineCompatibleVersion(
+	parsed []*semver.Version,
+	c *semver.Constraint,
+	versionMap map[string]string,
+	distTags map[string]string,
+	actualName string,
+	skip *semver.Version,
+) *semver.Version {
+	// Collect satisfying versions in descending order.
+	var candidates []*semver.Version
+	for _, v := range parsed {
+		if c.Check(v) && !v.Equal(skip) {
+			candidates = append(candidates, v)
+		}
+	}
+	// Sort descending.
+	for i := 0; i < len(candidates); i++ {
+		for j := i + 1; j < len(candidates); j++ {
+			if candidates[j].GreaterThan(candidates[i]) {
+				candidates[i], candidates[j] = candidates[j], candidates[i]
+			}
+		}
+	}
+	for _, v := range candidates {
+		ver := versionMap[v.String()]
+		meta, err := s.registry.FetchMetadata(s.ctx, actualName, ver)
+		if err != nil {
+			continue
+		}
+		if s.checkEngines(meta) {
+			return v
+		}
+	}
+	return nil
 }
 
 // resolveWorkspaceMember resolves a dependency to a local workspace member.

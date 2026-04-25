@@ -39,6 +39,7 @@ func generateCmd() *cobra.Command {
 		registryURL string
 		outputPath  string
 		platform    string
+		nodeVersion string
 	)
 
 	cmd := &cobra.Command{
@@ -71,6 +72,7 @@ func generateCmd() *cobra.Command {
 				Platform:         platform,
 				SpecDir:          filepath.Dir(specPath),
 				WorkspaceMembers: members,
+				NodeVersion:      nodeVersion,
 			}
 			if cutoffStr != "" {
 				t, err := time.Parse(time.RFC3339, cutoffStr)
@@ -106,6 +108,7 @@ func generateCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&registryURL, "registry", "r", "", "registry URL override")
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "output file path (default: stdout)")
 	cmd.Flags().StringVarP(&platform, "platform", "p", "", "target platform os/cpu (e.g., linux/x64) to filter incompatible optional deps")
+	cmd.Flags().StringVar(&nodeVersion, "node-version", "", "target Node.js version for engines.node filtering (e.g., 18.0.0)")
 
 	_ = cmd.MarkFlagRequired("spec")
 	_ = cmd.MarkFlagRequired("format")

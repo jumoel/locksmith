@@ -27,6 +27,11 @@ func (m *mockRegistry) addVersion(name, version string, published time.Time, dep
 	m.addVersionFull(name, version, published, deps, nil)
 }
 
+func (m *mockRegistry) addVersionWithEngines(name, version string, published time.Time, deps map[string]string, engines map[string]string) {
+	m.addVersion(name, version, published, deps)
+	m.packages[name].versions[version].Engines = engines
+}
+
 func (m *mockRegistry) addVersionFull(name, version string, published time.Time, deps, optDeps map[string]string) {
 	pkg, ok := m.packages[name]
 	if !ok {
@@ -472,5 +477,94 @@ func TestResolve_OptionalDepFails(t *testing.T) {
 	}
 	if _, ok := result.PlacedNodes["node_modules/B"]; !ok {
 		t.Error("B not placed")
+	}
+}
+
+func TestResolve_EnginesFilter(t *testing.T) {
+	reg := newMockRegistry()
+	// A@1.0.0: no engines constraint
+	reg.addVersion("A", "1.0.0", baseTime, nil)
+	// A@1.1.0: engines.node >= 14
+	reg.addVersionWithEngines("A", "1.1.0", baseTime.Add(24*time.Hour), nil, map[string]string{"node": ">=14"})
+	// A@1.2.0: engines.node >= 18
+	reg.addVersionWithEngines("A", "1.2.0", baseTime.Add(48*time.Hour), nil, map[string]string{"node": ">=18"})
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	// With NodeVersion 16.0.0: A@1.2.0 requires >=18, so it should be skipped.
+	// A@1.1.0 requires >=14 and passes. Should resolve to A@1.1.0.
+	r := NewResolver()
+	result, err := r.ResolveWithPlacement(context.Background(), project, reg, ecosystem.ResolveOptions{
+		NodeVersion: "16.0.0",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	edge := result.Graph.Root.Dependencies[0]
+	if edge.Target.Version != "1.1.0" {
+		t.Errorf("expected A@1.1.0 (engines filter skips 1.2.0), got A@%s", edge.Target.Version)
+	}
+}
+
+func TestResolve_EnginesFilter_NoNodeVersion(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("A", "1.0.0", baseTime, nil)
+	reg.addVersionWithEngines("A", "1.1.0", baseTime.Add(24*time.Hour), nil, map[string]string{"node": ">=14"})
+	reg.addVersionWithEngines("A", "1.2.0", baseTime.Add(48*time.Hour), nil, map[string]string{"node": ">=18"})
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	// Without NodeVersion: no filtering, should resolve to A@1.2.0 (highest).
+	r := NewResolver()
+	result, err := r.ResolveWithPlacement(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	edge := result.Graph.Root.Dependencies[0]
+	if edge.Target.Version != "1.2.0" {
+		t.Errorf("expected A@1.2.0 (no engines filter), got A@%s", edge.Target.Version)
+	}
+}
+
+func TestResolve_EnginesFilter_AllIncompatible(t *testing.T) {
+	reg := newMockRegistry()
+	// All versions require Node >= 18, but target is Node 14.
+	reg.addVersionWithEngines("A", "1.0.0", baseTime, nil, map[string]string{"node": ">=18"})
+	reg.addVersionWithEngines("A", "1.1.0", baseTime.Add(24*time.Hour), nil, map[string]string{"node": ">=18"})
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	// All versions are incompatible. npm behavior: use the best version anyway (warn, don't fail).
+	r := NewResolver()
+	result, err := r.ResolveWithPlacement(context.Background(), project, reg, ecosystem.ResolveOptions{
+		NodeVersion: "14.0.0",
+	})
+	if err != nil {
+		t.Fatalf("should not fail when all versions are incompatible (npm fallback): %v", err)
+	}
+
+	edge := result.Graph.Root.Dependencies[0]
+	if edge.Target.Version != "1.1.0" {
+		t.Errorf("expected A@1.1.0 (fallback to best when all incompatible), got A@%s", edge.Target.Version)
 	}
 }

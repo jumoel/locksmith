@@ -85,4 +85,10 @@ type GenerateOptions struct {
 	// Each entry maps a relative path (e.g., "packages/foo") to its raw spec file contents.
 	// If nil or empty, locksmith operates in single-package mode.
 	WorkspaceMembers map[string][]byte
+
+	// NodeVersion, if set, skips package versions whose engines.node
+	// constraint is incompatible with this Node.js version during resolution.
+	// Format: semver string (e.g., "18.0.0"). When all candidate versions
+	// are incompatible, the best version is used regardless (matches npm behavior).
+	NodeVersion string
 }

@@ -14,6 +14,11 @@ type ResolveOptions struct {
 	// WorkspaceIndex provides workspace member lookups for resolving workspace: protocol deps.
 	// Nil for single-package projects.
 	WorkspaceIndex *WorkspaceIndex
+	// NodeVersion, if set, skips package versions whose engines.node
+	// constraint is incompatible with this version during resolution.
+	// Format: semver string (e.g., "18.0.0"). When all candidate versions
+	// are incompatible, the best version is used regardless (matches npm behavior).
+	NodeVersion string
 }
 
 // Resolver takes a project spec and produces a fully resolved dependency graph.
