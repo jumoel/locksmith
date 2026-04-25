@@ -116,8 +116,8 @@ internal/semver/     npm-compatible semver range resolution
 internal/orderedjson Deterministic JSON serialization
 internal/maputil/    Shared map utilities
 
-cmd/locksmith/         CLI entry point
-testharness/         Integration tests, Docker setup, 49 fixtures
+cmd/locksmith/       CLI entry point
+testharness/         Integration tests, Docker setup, 57 fixtures
 ```
 
 ### Resolution engine
@@ -152,14 +152,16 @@ Each PM's resolver is a thin wrapper (~60-80 lines) that configures the policy a
 
 ### Correctness matrix
 
-900+ tests across 24 package manager versions and 56 fixtures, comparing resolved versions against what each real package manager produces (via Docker):
+1300+ tests across 27 package manager versions and 49 fixtures, comparing resolved versions against what each real package manager produces (via Docker):
 
 | PM versions tested | Fixtures |
 |---|---|
-| npm 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 | minimal, transitive, diamond, react 15-19, next 12-13, typescript 4-5, express, arborist edge cases, and more |
-| pnpm 4, 5, 7, 8, 9, 10 | Same fixtures |
-| yarn 1, 3, 4 | Same fixtures |
+| npm 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 | 49 fixtures: core patterns, react 15-19, next 12-13, typescript 4-5, express, webpack, overrides, peer deps, platform-specific, and more |
+| pnpm 4, 5, 6, 7, 8, 9, 10 | Same fixtures (pnpm-specific fixtures run with pnpm only) |
+| yarn 1, 2, 3.1, 3, 4 | Same fixtures (yarn-specific fixtures run with yarn only) |
 | bun | Same fixtures |
+
+Workspace correctness tests additionally compare resolution across npm 10, pnpm 10, yarn 1, yarn 4, and bun for 3 workspace fixtures.
 
 ### Running tests
 
@@ -167,10 +169,10 @@ Each PM's resolver is a thin wrapper (~60-80 lines) that configures the policy a
 # Unit tests (fast, no network)
 go test -short ./...
 
-# Generation tests against real npm registry
+# Generation + structural tests against real npm registry
 go test ./testharness/
 
-# Full Docker correctness matrix (requires Docker)
+# Full Docker correctness + acceptance matrix (requires Docker)
 go test -tags integration -timeout 25m ./testharness/
 ```
 
@@ -188,14 +190,14 @@ steps:
 
 ## Test fixtures
 
-56 package.json fixtures covering:
+57 package.json fixtures covering:
 
 - **Core patterns**: minimal, transitive, diamond, multi-dep, dev-deps, pinned, scoped, zero-deps
 - **Framework versions**: React 15-19, Next.js 12-15, TypeScript 4-5
-- **Large packages**: express, webpack, styled-components, eslint
-- **Edge cases**: conflicting version ranges, optional missing deps, circular peer deps, deprecated packages, platform-specific deps, aliased deps, non-registry deps, bundled deps
-- **Overrides**: npm overrides, yarn resolutions forcing transitive dep versions
-- **pnpm extensions**: packageExtensions injecting deps, peerDependencyRules controlling peer resolution
+- **Large packages**: express, webpack (deep-chain), styled-components, eslint
+- **Edge cases**: conflicting version ranges, optional missing deps, circular peer deps, deprecated packages, platform-specific deps, aliased deps, non-registry deps (file:, git, tarball URL), bundled deps, multiple peer providers
+- **Overrides**: npm `overrides`, yarn `resolutions` - force specific versions for transitive dependencies
+- **pnpm extensions**: `packageExtensions` injecting deps (with `packageExtensionsChecksum` in lockfile), `peerDependencyRules` controlling peer resolution (ignoreMissing, allowedVersions)
 - **Workspaces**: simple monorepo, cross-workspace deps with `workspace:*`, `workspace:^`, and npm-style semver ranges
 - **Arborist test suite**: dedupe, dev-deps, peer-cycle, optional-missing, peer-optional (using real @isaacs/ test packages)
 - **Package managers as deps**: npm 6/10, pnpm 8/9, yarn classic

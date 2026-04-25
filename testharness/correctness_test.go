@@ -129,8 +129,21 @@ func TestCorrectness(t *testing.T) {
 		"deprecated-pkg",
 		// Other real-world patterns
 		"peer-deps", "monorepo-tools", "cli-tools",
+		"express", "deep-chain", "multiple-peer-providers", "older-react",
 		// Mixed
 		"mixed-large", "many-direct",
+		// PM-version-specific
+		"npm-6", "npm-10", "pnpm-8", "pnpm-9",
+		// Aliases and overrides
+		"aliased-dep", "overrides-npm", "overrides-yarn",
+		// Optional deps
+		"optional-deps",
+		// Peer dep edge cases
+		"arborist-peer-optional", "peer-deps-meta-mixed",
+		// pnpm-specific features
+		"pnpm-package-extensions", "pnpm-peer-rules",
+		// Platform-specific deps (no platform filter in correctness, so all included)
+		"platform-specific",
 	})
 
 	// Known incompatible combinations where the real PM can't generate a
@@ -146,9 +159,10 @@ func TestCorrectness(t *testing.T) {
 		// but locksmith includes them (no platform filter in correctness tests)
 		"npm@2-shrinkwrap/arborist-optional-missing": "npm@2 excludes platform-incompatible optional deps",
 		// yarn@2 can't resolve some newer packages
-		"yarn@2-v4/mixed-large":   "yarn@2 can't resolve some newer packages",
-		"yarn@2-v4/typescript-4":  "yarn@2 can't resolve typescript@4",
-		"yarn@2-v4/typescript-5":  "yarn@2 can't resolve typescript@5",
+		"yarn@2-v4/mixed-large":              "yarn@2 can't resolve some newer packages",
+		"yarn@2-v4/typescript-4":             "yarn@2 can't resolve typescript@4",
+		"yarn@2-v4/typescript-5":             "yarn@2 can't resolve typescript@5",
+		"yarn@2-v4/multiple-peer-providers":  "yarn@2 can't resolve newer packages",
 	}
 
 	// npm 2-4 shrinkwrap excludes devDependencies.
@@ -167,9 +181,52 @@ func TestCorrectness(t *testing.T) {
 	// npm@5 as fallback because npm@2 auto-installs peers but npm@5 doesn't.
 	npm2CrashFixtures := []string{
 		"peer-chain", "peer-deps", "cli-tools", "next-12", "next-13",
+		"deep-chain", "multiple-peer-providers", "express", "npm-10",
 	}
 	for _, f := range npm2CrashFixtures {
 		skipCombos["npm@2-shrinkwrap/"+f] = "npm@2 crashes on complex dep trees (ENOTDIR)"
+	}
+
+	// npm overrides fixture only applies to npm and bun.
+	for _, cc := range correctnessMatrix {
+		if !strings.HasPrefix(cc.PMLabel, "npm") && cc.PMLabel != "bun" {
+			skipCombos[cc.PMLabel+"/overrides-npm"] = "npm overrides only apply to npm and bun"
+		}
+	}
+
+	// aliased-dep: npm 2/5/6 crash on npm: alias syntax.
+	for _, pm := range []string{"npm@2-shrinkwrap", "npm@5-shrinkwrap", "npm@6-shrinkwrap", "npm@5-v1", "npm@6-v1"} {
+		skipCombos[pm+"/aliased-dep"] = "npm 2/5/6 crashes on npm: alias syntax"
+	}
+
+	// yarn resolutions fixture only applies to yarn.
+	for _, cc := range correctnessMatrix {
+		if !strings.HasPrefix(cc.PMLabel, "yarn") {
+			skipCombos[cc.PMLabel+"/overrides-yarn"] = "yarn resolutions only apply to yarn"
+		}
+	}
+
+	// pnpm-specific fixtures only apply to pnpm.
+	for _, cc := range correctnessMatrix {
+		if !strings.HasPrefix(cc.PMLabel, "pnpm") {
+			skipCombos[cc.PMLabel+"/pnpm-package-extensions"] = "pnpm packageExtensions only applies to pnpm"
+			skipCombos[cc.PMLabel+"/pnpm-peer-rules"] = "pnpm peerDependencyRules only applies to pnpm"
+		}
+	}
+
+	// pnpm@4 doesn't support packageExtensions or peerDependencyRules.
+	skipCombos["pnpm@4-v5.1/pnpm-package-extensions"] = "pnpm@4 doesn't support packageExtensions"
+	skipCombos["pnpm@4-v5.1/pnpm-peer-rules"] = "pnpm@4 doesn't support peerDependencyRules"
+
+	// yarn berry v3/v4 patches resolve and adds @types/* auto-types for some fixtures.
+	for _, pm := range []string{"yarn@3-v6", "yarn@4-v8"} {
+		skipCombos[pm+"/multiple-peer-providers"] = "yarn v6/v8 patches resolve and adds @types/* auto-types"
+		skipCombos[pm+"/npm-6"] = "yarn v6/v8 patches resolve and adds @types/* auto-types"
+	}
+
+	// deep-chain (webpack) is very large; npm 2-4 shrinkwrap crash.
+	for _, pm := range []string{"npm@3-shrinkwrap", "npm@4-shrinkwrap"} {
+		skipCombos[pm+"/deep-chain"] = "npm 3-4 shrinkwrap crashes on webpack-sized dep trees"
 	}
 
 	for _, cc := range correctnessMatrix {

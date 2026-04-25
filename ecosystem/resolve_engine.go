@@ -140,7 +140,7 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 	}
 
 	for _, dep := range project.Dependencies {
-		node, err := state.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
+		node, _, err := state.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
 		if err != nil {
 			if dep.Type == DepOptional {
 				continue
@@ -160,7 +160,7 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 			}
 			memberNode := &Node{Name: member.Spec.Name, Version: member.Spec.Version, WorkspacePath: member.RelPath}
 			for _, dep := range member.Spec.Dependencies {
-				node, err := state.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
+				node, _, err := state.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
 				if err != nil {
 					if dep.Type == DepOptional {
 						continue
@@ -181,7 +181,12 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 	return graph, nil
 }
 
-func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depType DepType) (*Node, error) {
+// resolveDep resolves a single dependency. It returns the resolved node and the
+// effective constraint used for resolution (which may differ from the input
+// constraint when overrides apply). Callers building transitive dependency edges
+// should use the returned effective constraint so that lockfile formatters
+// see the post-override constraint in edge.Constraint.
+func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depType DepType) (*Node, string, error) {
 	// Handle npm alias syntax: "npm:actual-package@^1.0.0"
 	// The alias name is used for the dependency key, but the actual package
 	// name and constraint are extracted for registry resolution.
@@ -211,15 +216,17 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	if strings.HasPrefix(actualConstraint, "workspace:") {
 		member := s.workspaceIndex.Resolve(actualName)
 		if member == nil {
-			return nil, fmt.Errorf("workspace member %q not found in workspace index", actualName)
+			return nil, "", fmt.Errorf("workspace member %q not found in workspace index", actualName)
 		}
-		return s.resolveWorkspaceMember(graph, member)
+		node, err := s.resolveWorkspaceMember(graph, member)
+		return node, actualConstraint, err
 	}
 
 	// npm/yarn-classic: resolve regular constraints to workspace members by name.
 	if s.policy.ResolveWorkspaceByName && s.workspaceIndex != nil {
 		if member := s.workspaceIndex.Resolve(actualName); member != nil {
-			return s.resolveWorkspaceMember(graph, member)
+			node, err := s.resolveWorkspaceMember(graph, member)
+			return node, actualConstraint, err
 		}
 	}
 
@@ -229,7 +236,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	if isNonRegistrySpecifier(actualConstraint) {
 		key := actualName + "@" + actualConstraint
 		if node, ok := s.nodes[key]; ok {
-			return node, nil
+			return node, actualConstraint, nil
 		}
 
 		version := "0.0.0-local"
@@ -248,7 +255,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 					// Fully resolved - create a proper node, not a placeholder.
 					resolvedKey := meta.Name + "@" + meta.Version
 					if existingNode, ok := s.nodes[resolvedKey]; ok {
-						return existingNode, nil
+						return existingNode, actualConstraint, nil
 					}
 					node := &Node{
 						Name:       meta.Name,
@@ -264,18 +271,18 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 					graph.Nodes[resolvedKey] = node
 					// Resolve transitive deps of the tarball package.
 					for depName, depConstraint := range meta.Dependencies {
-						child, err := s.resolveDep(graph, depName, depConstraint, DepRegular)
+						child, effConstraint, err := s.resolveDep(graph, depName, depConstraint, DepRegular)
 						if err != nil {
 							continue
 						}
 						node.Dependencies = append(node.Dependencies, &Edge{
-							Name: depName, Constraint: depConstraint, Target: child, Type: DepRegular,
+							Name: depName, Constraint: effConstraint, Target: child, Type: DepRegular,
 						})
 					}
 					if s.policy.OnNodeResolved != nil {
 						s.policy.OnNodeResolved(resolvedKey, node, meta, node.Dependencies)
 					}
-					return node, nil
+					return node, actualConstraint, nil
 				}
 			}
 		} else if owner, repo, ok := parseGitHubURL(actualConstraint); ok {
@@ -299,12 +306,12 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 
 				// Resolve transitive deps from the GitHub package.json.
 				for depName, depConstraint := range info.Dependencies {
-					child, err := s.resolveDep(graph, depName, depConstraint, DepRegular)
+					child, effConstraint, err := s.resolveDep(graph, depName, depConstraint, DepRegular)
 					if err != nil {
 						continue
 					}
 					node.Dependencies = append(node.Dependencies, &Edge{
-						Name: depName, Constraint: depConstraint, Target: child, Type: DepRegular,
+						Name: depName, Constraint: effConstraint, Target: child, Type: DepRegular,
 					})
 				}
 				if s.policy.OnNodeResolved != nil {
@@ -312,7 +319,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 						Name: actualName, Version: version,
 					}, node.Dependencies)
 				}
-				return node, nil
+				return node, actualConstraint, nil
 			}
 		}
 
@@ -329,17 +336,17 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 				Name: actualName, Version: version,
 			}, nil)
 		}
-		return node, nil
+		return node, actualConstraint, nil
 	}
 
 	c, err := semver.ParseConstraint(actualConstraint)
 	if err != nil {
-		return nil, fmt.Errorf("parsing constraint %q: %w", actualConstraint, err)
+		return nil, "", fmt.Errorf("parsing constraint %q: %w", actualConstraint, err)
 	}
 
 	versions, err := s.registry.FetchVersions(s.ctx, actualName, s.cutoff)
 	if err != nil {
-		return nil, fmt.Errorf("fetching versions for %s: %w", actualName, err)
+		return nil, "", fmt.Errorf("fetching versions for %s: %w", actualName, err)
 	}
 
 	var parsed []*semver.Version
@@ -356,7 +363,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	// Cross-tree dedup for transitive deps: O(1) via NodeIndex.
 	if s.policy.CrossTreeDedup && !s.projectDeps[name] {
 		if existing := s.nodeIndex.FindSatisfying(actualName, c); existing != nil {
-			return existing, nil
+			return existing, actualConstraint, nil
 		}
 	}
 
@@ -372,7 +379,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		best = semver.PickVersion(parsed, c, distTags["latest"])
 	}
 	if best == nil {
-		return nil, fmt.Errorf("no version of %s satisfies %s", actualName, actualConstraint)
+		return nil, "", fmt.Errorf("no version of %s satisfies %s", actualName, actualConstraint)
 	}
 
 	version := versionMap[best.String()]
@@ -380,7 +387,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 
 	// Exact version dedup.
 	if node, ok := s.nodes[key]; ok {
-		return node, nil
+		return node, actualConstraint, nil
 	}
 
 	// Cycle detection.
@@ -389,14 +396,14 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		s.nodes[key] = node
 		s.nodeIndex.Add(actualName, node)
 		graph.Nodes[key] = node
-		return node, nil
+		return node, actualConstraint, nil
 	}
 	s.resolving[key] = true
 	defer func() { delete(s.resolving, key) }()
 
 	meta, err := s.registry.FetchMetadata(s.ctx, actualName, version)
 	if err != nil {
-		return nil, fmt.Errorf("fetching metadata for %s@%s: %w", actualName, version, err)
+		return nil, "", fmt.Errorf("fetching metadata for %s@%s: %w", actualName, version, err)
 	}
 
 	// Check engines.node compatibility. If the selected version is incompatible
@@ -411,13 +418,13 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 			version = versionMap[fallback.String()]
 			key = actualName + "@" + version
 			if node, ok := s.nodes[key]; ok {
-				return node, nil
+				return node, actualConstraint, nil
 			}
 			s.resolving[key] = true
 			// Re-fetch metadata for the new version.
 			meta, err = s.registry.FetchMetadata(s.ctx, actualName, version)
 			if err != nil {
-				return nil, fmt.Errorf("fetching metadata for %s@%s: %w", actualName, version, err)
+				return nil, "", fmt.Errorf("fetching metadata for %s@%s: %w", actualName, version, err)
 			}
 		}
 		// If fallback is nil, all versions are incompatible. Keep the original
@@ -483,12 +490,12 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		}
 
 		depConstraint := meta.Dependencies[depName]
-		child, err := s.resolveDep(graph, depName, depConstraint, DepRegular)
+		child, effConstraint, err := s.resolveDep(graph, depName, depConstraint, DepRegular)
 		if err != nil {
-			return nil, fmt.Errorf("resolving transitive dep %s@%s (from %s): %w", depName, depConstraint, key, err)
+			return nil, "", fmt.Errorf("resolving transitive dep %s@%s (from %s): %w", depName, depConstraint, key, err)
 		}
 		node.Dependencies = append(node.Dependencies, &Edge{
-			Name: depName, Constraint: depConstraint, Target: child, Type: DepRegular,
+			Name: depName, Constraint: effConstraint, Target: child, Type: DepRegular,
 		})
 	}
 
@@ -499,12 +506,12 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 			continue
 		}
 		depConstraint := meta.OptionalDeps[depName]
-		child, err := s.resolveDep(graph, depName, depConstraint, DepOptional)
+		child, effConstraint, err := s.resolveDep(graph, depName, depConstraint, DepOptional)
 		if err != nil {
 			continue
 		}
 		node.Dependencies = append(node.Dependencies, &Edge{
-			Name: depName, Constraint: depConstraint, Target: child, Type: DepOptional,
+			Name: depName, Constraint: effConstraint, Target: child, Type: DepOptional,
 		})
 	}
 
@@ -545,12 +552,12 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 					depConstraint = allowed
 				}
 			}
-			child, err := s.resolveDep(graph, depName, depConstraint, DepPeer)
+			child, effConstraint, err := s.resolveDep(graph, depName, depConstraint, DepPeer)
 			if err != nil {
 				continue
 			}
 			node.Dependencies = append(node.Dependencies, &Edge{
-				Name: depName, Constraint: depConstraint, Target: child, Type: DepPeer,
+				Name: depName, Constraint: effConstraint, Target: child, Type: DepPeer,
 			})
 		}
 	}
@@ -560,7 +567,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		s.policy.OnNodeResolved(key, node, meta, node.Dependencies)
 	}
 
-	return node, nil
+	return node, actualConstraint, nil
 }
 
 // checkEngines returns true if the metadata's engines.node constraint is
@@ -638,7 +645,7 @@ func (s *resolverState) resolveWorkspaceMember(graph *Graph, member *WorkspaceMe
 	s.nodes[key] = node
 	// Resolve the workspace member's own dependencies.
 	for _, dep := range member.Spec.Dependencies {
-		child, err := s.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
+		child, _, err := s.resolveDep(graph, dep.Name, dep.Constraint, dep.Type)
 		if err != nil {
 			if dep.Type == DepOptional {
 				continue

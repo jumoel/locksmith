@@ -82,6 +82,10 @@ func computePlacement(graph *ecosystem.Graph) (*ResolveResult, error) {
 	result.Root = rootPlaced
 
 	// Phase 1: Place root's direct dependencies at root level first.
+	// For workspace members, create both the link entry (node_modules/name)
+	// and a workspace directory node (packages/name) that serves as the
+	// parent for the member's transitive deps.
+	wsPlacedByName := make(map[string]*PlacedNode) // name -> workspace dir placed node
 	for _, edge := range graph.Root.Dependencies {
 		if edge.Target == nil {
 			continue
@@ -95,6 +99,19 @@ func computePlacement(graph *ecosystem.Graph) (*ResolveResult, error) {
 		}
 		rootPlaced.Children[edge.Name] = placed
 		result.PlacedNodes[path] = placed
+
+		// For workspace members, create a directory-level placement node.
+		// npm nests workspace member deps under the member's directory path
+		// (e.g., packages/lib-b/node_modules/dep), not under the link path.
+		if edge.Target.WorkspacePath != "" {
+			wsDir := &PlacedNode{
+				Path:     edge.Target.WorkspacePath,
+				Node:     edge.Target,
+				Children: make(map[string]*PlacedNode),
+				Parent:   rootPlaced,
+			}
+			wsPlacedByName[edge.Name] = wsDir
+		}
 	}
 
 	// Phase 2: Place transitive dependencies using BFS.
@@ -107,8 +124,14 @@ func computePlacement(graph *ecosystem.Graph) (*ResolveResult, error) {
 		if edge.Target == nil {
 			continue
 		}
+		// For workspace members, use the workspace directory node as the
+		// parent for transitive deps so they get placed at the correct path.
+		parent := rootPlaced.Children[edge.Name]
+		if wsDir, ok := wsPlacedByName[edge.Name]; ok {
+			parent = wsDir
+		}
 		queue = append(queue, placeWork{
-			parent: rootPlaced.Children[edge.Name],
+			parent: parent,
 			node:   edge.Target,
 		})
 	}

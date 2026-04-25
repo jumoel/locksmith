@@ -198,11 +198,10 @@ func TestIntegration(t *testing.T) {
 						// Only npm and yarn classic support resolve-by-name.
 						// Other PMs (pnpm, bun, yarn berry) require workspace: protocol.
 						if fixture == "workspace-npm-style" {
-							// Only yarn classic currently passes acceptance for npm-style workspaces.
-							// npm: lockfile workspace member placement needs further work.
-							// pnpm/bun/yarn berry: require workspace: protocol.
-							if vc.PMName != "yarn" || vc.PMVersion != "1" {
-								t.Skip("workspace-npm-style acceptance only verified for yarn classic")
+							// npm-style workspaces use resolve-by-name for cross-deps.
+							// Only npm and yarn classic support this; others need workspace: protocol.
+							if vc.PMName != "npm" && !(vc.PMName == "yarn" && vc.PMVersion == "1") {
+								t.Skip("workspace-npm-style only supported by npm and yarn classic")
 							}
 						}
 						if vc.PMName == "pnpm" && vc.PMVersion == "4" {
@@ -210,17 +209,15 @@ func TestIntegration(t *testing.T) {
 						}
 					}
 					// Override/extension fixtures use PM-specific package.json fields.
-					// Skip for PMs that don't support the specific field, and skip
-					// cases where the lockfile format needs additional metadata
-					// (pnpm packageExtensionsChecksum, yarn resolution diffs).
+					// Skip for PMs that don't support the specific field.
 					if fixture == "overrides-npm" && vc.PMName != "npm" && vc.PMName != "bun" {
 						t.Skip("npm overrides fixture only applies to npm and bun")
 					}
-					if fixture == "overrides-yarn" {
-						t.Skip("yarn resolutions lockfile format needs resolution diff fixes")
+					if fixture == "overrides-yarn" && vc.PMName != "yarn" {
+						t.Skip("yarn resolutions fixture only applies to yarn")
 					}
-					if fixture == "pnpm-package-extensions" {
-						t.Skip("pnpm packageExtensions requires packageExtensionsChecksum in lockfile")
+					if fixture == "pnpm-package-extensions" && vc.PMName != "pnpm" {
+						t.Skip("pnpm packageExtensions fixture only applies to pnpm")
 					}
 					if fixture == "pnpm-peer-rules" && vc.PMName != "pnpm" {
 						t.Skip("pnpm peerDependencyRules fixture only applies to pnpm")

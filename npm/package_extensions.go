@@ -42,7 +42,7 @@ func ParsePackageExtensions(raw json.RawMessage) (*ecosystem.PackageExtensionSet
 		extensions = append(extensions, ext)
 	}
 
-	return &ecosystem.PackageExtensionSet{Extensions: extensions}, nil
+	return &ecosystem.PackageExtensionSet{Extensions: extensions, RawJSON: raw}, nil
 }
 
 // splitPackageKey splits a key like "name@range" or "@scope/name@range"

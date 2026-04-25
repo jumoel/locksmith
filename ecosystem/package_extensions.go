@@ -1,6 +1,8 @@
 package ecosystem
 
 import (
+	"encoding/json"
+
 	"github.com/jumoel/locksmith/internal/semver"
 )
 
@@ -15,6 +17,9 @@ type PackageExtension struct {
 // PackageExtensionSet holds parsed packageExtensions.
 type PackageExtensionSet struct {
 	Extensions []PackageExtension
+	// RawJSON preserves the original JSON for checksum computation.
+	// pnpm stores a hash of this in the lockfile settings section.
+	RawJSON json.RawMessage
 }
 
 // Apply merges matching extensions into the given metadata.

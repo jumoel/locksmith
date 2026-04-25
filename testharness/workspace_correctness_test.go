@@ -72,6 +72,7 @@ var workspaceCorrectnessMatrix = []correctnessCase{
 var workspaceFixtures = []string{
 	"workspace-simple",
 	"workspace-npm-style",
+	"workspace-cross-deps",
 }
 
 // TestWorkspaceCorrectness generates workspace lockfiles with both locksmith
@@ -88,6 +89,21 @@ func TestWorkspaceCorrectness(t *testing.T) {
 					// pnpm requires workspace: protocol for cross-workspace deps.
 					if fixture == "workspace-npm-style" && strings.HasPrefix(cc.PMLabel, "pnpm") {
 						t.Skip("pnpm requires workspace: protocol for cross-workspace deps")
+					}
+					// workspace-cross-deps uses workspace:^ which npm and yarn classic don't support.
+					if fixture == "workspace-cross-deps" {
+						if cc.PMLabel == "npm@10-v3" {
+							t.Skip("npm doesn't support workspace: protocol in package.json")
+						}
+						if cc.PMLabel == "yarn@1" {
+							t.Skip("yarn classic doesn't support workspace: protocol")
+						}
+					}
+					// workspace-npm-style uses resolve-by-name which bun/yarn berry don't support.
+					if fixture == "workspace-npm-style" {
+						if cc.PMLabel == "bun" || cc.PMLabel == "yarn@4-v8" {
+							t.Skip("workspace-npm-style requires resolve-by-name (npm/yarn classic only)")
+						}
 					}
 					t.Parallel()
 					compareWorkspaceResolution(t, cc, fixture)
@@ -223,6 +239,21 @@ func TestWorkspaceAcceptance(t *testing.T) {
 					// pnpm requires workspace: protocol for cross-workspace deps.
 					if fixture == "workspace-npm-style" && vc.PMName == "pnpm" {
 						t.Skip("pnpm requires workspace: protocol for cross-workspace deps")
+					}
+					// workspace-cross-deps uses workspace:^ which npm and yarn classic don't support.
+					if fixture == "workspace-cross-deps" {
+						if vc.PMName == "npm" {
+							t.Skip("npm doesn't support workspace: protocol in package.json")
+						}
+						if vc.PMName == "yarn" && vc.PMVersion == "1" {
+							t.Skip("yarn classic doesn't support workspace: protocol")
+						}
+					}
+					// workspace-npm-style uses resolve-by-name which bun/yarn berry don't support.
+					if fixture == "workspace-npm-style" {
+						if vc.PMName == "bun" || (vc.PMName == "yarn" && vc.PMVersion != "1") {
+							t.Skip("workspace-npm-style requires resolve-by-name (npm/yarn classic only)")
+						}
 					}
 					t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion

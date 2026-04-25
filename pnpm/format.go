@@ -53,6 +53,11 @@ func (f *PnpmLockV9Formatter) FormatFromResult(result *ResolveResult, project *e
 	settings := &yaml.Node{Kind: yaml.MappingNode}
 	addMapping(settings, "autoInstallPeers", scalarNode("true", 0))
 	addMapping(settings, "excludeLinksFromLockfile", scalarNode("false", 0))
+	if project.PackageExtensions != nil && len(project.PackageExtensions.RawJSON) > 0 {
+		if checksum, err := objectHashSHA256(project.PackageExtensions.RawJSON); err == nil {
+			addMapping(settings, "packageExtensionsChecksum", scalarNode(checksum, 0))
+		}
+	}
 	addMapping(root, "settings", settings)
 
 	// importers
@@ -824,6 +829,11 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 	settings := &yaml.Node{Kind: yaml.MappingNode}
 	addMapping(settings, "autoInstallPeers", scalarNode("true", 0))
 	addMapping(settings, "excludeLinksFromLockfile", scalarNode("false", 0))
+	if project.PackageExtensions != nil && len(project.PackageExtensions.RawJSON) > 0 {
+		if checksum, err := objectHashMD5(project.PackageExtensions.RawJSON); err == nil {
+			addMapping(settings, "packageExtensionsChecksum", scalarNode(checksum, 0))
+		}
+	}
 	addMapping(root, "settings", settings)
 
 	// importers (reuse the v9 importer builder, with v6 key format for aliases)
