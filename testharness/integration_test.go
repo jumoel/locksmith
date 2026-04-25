@@ -156,10 +156,10 @@ func TestIntegration(t *testing.T) {
 							t.Skip("npm 2 crashes with ENOTDIR on complex dep trees")
 						}
 					}
-					// Yarn berry non-registry git deps: the fixture has git+ssh:// deps
-					// requiring SSH keys unavailable in Docker.
-					if fixture == "non-registry-deps" && vc.PMName == "yarn" && vc.PMVersion != "1" {
-						t.Skip("yarn berry non-registry-deps fixture requires SSH keys for git+ssh:// deps")
+					// non-registry-deps has git+ssh:// deps requiring SSH keys unavailable in Docker.
+					// Skip for yarn berry and pnpm (pnpm tries to resolve git+ssh and fails).
+					if fixture == "non-registry-deps" && (vc.PMName == "pnpm" || (vc.PMName == "yarn" && vc.PMVersion != "1")) {
+						t.Skip("non-registry-deps fixture requires SSH keys for git+ssh:// deps in Docker")
 					}
 					// Yarn berry applies internal patches to typescript and resolve packages.
 					if vc.PMName == "yarn" && vc.PMVersion != "1" {
