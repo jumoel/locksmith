@@ -124,7 +124,8 @@ func TestIntegration(t *testing.T) {
 
 	for _, vc := range verificationMatrix {
 		vc := vc
-		t.Run(string(vc.Format), func(t *testing.T) {
+		groupName := string(vc.Format) + "/" + vc.PMName + "@" + vc.PMVersion
+		t.Run(groupName, func(t *testing.T) {
 			t.Parallel()
 			for _, fixture := range allFixtures {
 				fixture := fixture
@@ -228,10 +229,7 @@ func TestIntegration(t *testing.T) {
 						t.Skip("pnpm peerDependencyRules fixture only applies to pnpm")
 					}
 					t.Parallel()
-					pmTag := vc.PMName + "_" + vc.PMVersion
-					t.Run(pmTag, func(t *testing.T) {
-						runVerification(t, vc, fixture)
-					})
+					runVerification(t, vc, fixture)
 				})
 			}
 		})

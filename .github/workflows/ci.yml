@@ -81,29 +81,75 @@ jobs:
           -run "TestCorrectness/${{ matrix.group }}"
           ./testharness/ -v
 
-  acceptance-tests:
-    name: "Acceptance: ${{ matrix.format }}"
+  workspace-tests:
+    name: Workspace correctness + acceptance
     runs-on: ubuntu-latest
     needs: unit-tests
-    timeout-minutes: 20
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build Docker test runner
+        run: docker build --platform linux/amd64 -t locksmith-test-runner testharness/
+      - name: Run workspace tests
+        run: >
+          go test -tags integration -count=1 -timeout 12m
+          -run "TestWorkspace"
+          ./testharness/ -v
+
+  acceptance-tests:
+    name: "Acceptance: ${{ matrix.group }}"
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        format:
-          - package-lock-v1
-          - package-lock-v2
-          - package-lock-v3
-          - npm-shrinkwrap
-          - pnpm-lock-v4
-          - pnpm-lock-v5
-          - pnpm-lock-v6
-          - pnpm-lock-v9
-          - yarn-classic
-          - yarn-berry-v4
-          - yarn-berry-v5
-          - yarn-berry-v6
-          - yarn-berry-v8
-          - bun-lock
+        group:
+          # npm shrinkwrap: split into old (2, 5, 6) and new (7-11) to stay under timeout
+          - npm-shrinkwrap/npm@2
+          - npm-shrinkwrap/npm@5
+          - npm-shrinkwrap/npm@6
+          - npm-shrinkwrap/npm@7
+          - npm-shrinkwrap/npm@8
+          - npm-shrinkwrap/npm@9
+          - npm-shrinkwrap/npm@10
+          - npm-shrinkwrap/npm@11
+          # package-lock v1-v3: split into per-version jobs
+          - package-lock-v1/npm@6
+          - package-lock-v1/npm@7
+          - package-lock-v1/npm@8
+          - package-lock-v1/npm@9
+          - package-lock-v1/npm@10
+          - package-lock-v1/npm@11
+          - package-lock-v2/npm@7
+          - package-lock-v2/npm@8
+          - package-lock-v2/npm@9
+          - package-lock-v2/npm@10
+          - package-lock-v2/npm@11
+          - package-lock-v3/npm@7
+          - package-lock-v3/npm@8
+          - package-lock-v3/npm@9
+          - package-lock-v3/npm@10
+          - package-lock-v3/npm@11
+          # pnpm
+          - pnpm-lock-v4/pnpm@4
+          - pnpm-lock-v5/pnpm@5
+          - pnpm-lock-v5/pnpm@6
+          - pnpm-lock-v5/pnpm@7
+          - pnpm-lock-v6/pnpm@8
+          - pnpm-lock-v9/pnpm@9
+          - pnpm-lock-v9/pnpm@10
+          # yarn
+          - yarn-classic/yarn@1
+          - yarn-berry-v4/yarn@2
+          - yarn-berry-v5/yarn@3.1
+          - yarn-berry-v6/yarn@3
+          - yarn-berry-v8/yarn@4
+          # bun
+          - bun-lock/bun@latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -113,6 +159,6 @@ jobs:
         run: docker build --platform linux/amd64 -t locksmith-test-runner testharness/
       - name: Run acceptance tests
         run: >
-          go test -tags integration -count=1 -timeout 18m
-          -run "TestIntegration/${{ matrix.format }}"
+          go test -tags integration -count=1 -timeout 12m
+          -run "TestIntegration/${{ matrix.group }}"
           ./testharness/ -v
