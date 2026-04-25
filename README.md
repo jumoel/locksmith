@@ -73,7 +73,7 @@ locksmith generate \
   --output package-lock.json
 ```
 
-Optional flags: `--cutoff 2025-01-01` (only resolve versions published before this date), `--registry https://registry.npmjs.org` (override registry URL).
+Optional flags: `--cutoff 2025-01-01` (only resolve versions published before this date), `--registry https://registry.npmjs.org` (override registry URL), `--node-version 18.0.0` (skip versions incompatible with target Node.js), `--platform linux/x64` (filter platform-specific optional deps).
 
 ## Supported formats
 
@@ -144,6 +144,8 @@ Each PM's resolver is a thin wrapper (~60-80 lines) that configures the policy a
 - **Cutoff date filtering**: only resolves versions published before a given date
 - **Version overrides**: npm `overrides`, pnpm `pnpm.overrides`, and yarn `resolutions` - force specific versions for transitive dependencies
 - **pnpm extensions**: `pnpm.packageExtensions` to inject missing deps into packages, `pnpm.peerDependencyRules` to control peer dep resolution (ignoreMissing, allowedVersions)
+- **Engines enforcement**: `--node-version` skips packages incompatible with target Node.js, falls back to best-available when all versions are incompatible
+- **Registry resilience**: automatic retry with exponential backoff on 429 rate limits and 5xx server errors
 - **Per-PM-version PolicyOverride**: callers can specify exact resolution behavior for any PM version
 
 ## Testing
