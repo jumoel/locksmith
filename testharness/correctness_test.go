@@ -222,6 +222,11 @@ func TestCorrectness(t *testing.T) {
 	skipCombos["pnpm@4-v5.1/pnpm-package-extensions"] = "pnpm@4 doesn't support packageExtensions"
 	skipCombos["pnpm@5-v5.2/pnpm-package-extensions"] = "pnpm@5 doesn't support packageExtensions"
 	skipCombos["pnpm@4-v5.1/pnpm-peer-rules"] = "pnpm@4 doesn't support peerDependencyRules"
+	// pnpm@8 treats ignoreMissing as "don't auto-install this peer" while
+	// pnpm@10 treats it as "suppress error but still auto-install if possible".
+	// locksmith matches pnpm@10 behavior.
+	skipCombos["pnpm@8-v6/pnpm-peer-rules"] = "pnpm@8 treats ignoreMissing as skip-auto-install (pnpm@10 doesn't)"
+
 	// npm@2 handles optional and platform-specific deps differently (excludes
 	// platform-incompatible deps from shrinkwrap).
 	skipCombos["npm@2-shrinkwrap/platform-specific"] = "npm@2 excludes platform-incompatible optional deps"

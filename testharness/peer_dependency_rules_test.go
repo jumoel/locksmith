@@ -33,19 +33,20 @@ func TestPnpmPeerRules_IgnoreMissing(t *testing.T) {
 		t.Error("react-dom not found in pnpm lockfile")
 	}
 
-	// react should NOT be present - it's a peer dep of react-dom but
-	// is listed in peerDependencyRules.ignoreMissing.
-	// In pnpm lockfile v9, packages section uses keys like "react@18.3.1".
-	// We check that react does not appear as a standalone package entry.
+	// react SHOULD be present - ignoreMissing suppresses errors for unresolvable
+	// peers but doesn't prevent auto-installation. react-dom has a peer dep on
+	// react, and with autoInstallPeers=true (pnpm default), react gets auto-installed.
+	reactFound := false
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// Match package keys like "react@18.x.x:" in the packages section.
-		// Skip lines that are part of react-dom entries.
 		if strings.HasPrefix(trimmed, "react@") && !strings.HasPrefix(trimmed, "react-") {
-			t.Errorf("react should NOT appear as a package in the lockfile when ignoreMissing includes 'react', found: %s", trimmed)
+			reactFound = true
 			break
 		}
+	}
+	if !reactFound {
+		t.Error("react should be auto-installed (ignoreMissing suppresses errors, doesn't prevent installation)")
 	}
 }
 
