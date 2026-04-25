@@ -56,6 +56,12 @@ type ResolverPolicy struct {
 	// (VersionSelectPreferLatest) is the safe default for most PMs.
 	VersionSelection VersionSelection
 
+	// IgnoreMissingPreventsInstall: when true, peerDependencyRules.ignoreMissing
+	// prevents auto-installation of matching peers (pnpm 8-9 behavior). When false,
+	// ignoreMissing only suppresses errors for unresolvable peers but still allows
+	// auto-installation (pnpm 10+ behavior). Default false matches pnpm 10+.
+	IgnoreMissingPreventsInstall bool
+
 	// ResolveWorkspaceByName: when true and a workspace index is available,
 	// resolve regular semver constraints to workspace members if the dep name
 	// matches a member. This is npm and yarn classic behavior where cross-workspace
@@ -79,6 +85,7 @@ func (p *ResolverPolicy) ApplyOverride(override *ResolverPolicy) {
 	p.StorePeerMetaOnNode = override.StorePeerMetaOnNode
 	p.SkipOptionalPeerDeps = override.SkipOptionalPeerDeps
 	p.VersionSelection = override.VersionSelection
+	p.IgnoreMissingPreventsInstall = override.IgnoreMissingPreventsInstall
 	p.ResolveWorkspaceByName = override.ResolveWorkspaceByName
 }
 
@@ -531,6 +538,11 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 			}
 			// Skip optional peers.
 			if pm, ok := meta.PeerDepsMeta[depName]; ok && pm.Optional {
+				continue
+			}
+			// pnpm 8-9: ignoreMissing prevents auto-install entirely.
+			// pnpm 10+: ignoreMissing only suppresses errors (handled at resolution failure).
+			if s.policy.IgnoreMissingPreventsInstall && s.peerDepRules != nil && s.matchesIgnoreMissing(depName) {
 				continue
 			}
 			// Skip if provided by the project.

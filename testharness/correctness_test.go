@@ -41,6 +41,15 @@ var noPeerAutoInstall = &ecosystem.ResolverPolicy{
 	AutoInstallPeers: false,
 }
 
+// pnpm89Policy matches pnpm 8-9 behavior: auto-install peers, but
+// ignoreMissing prevents auto-installation (changed in pnpm 10).
+var pnpm89Policy = &ecosystem.ResolverPolicy{
+	CrossTreeDedup:              true,
+	AutoInstallPeers:            true,
+	SkipOptionalPeerDeps:        true,
+	IgnoreMissingPreventsInstall: true,
+}
+
 // correctnessMatrix defines all format/pm pairs for resolution comparison.
 // Each entry pairs a locksmith format with every real package manager version
 // that natively produces that format.
@@ -76,8 +85,8 @@ var correctnessMatrix = []correctnessCase{
 	{locksmith.FormatPnpmLockV4, "pnpm-lock.yaml", "pnpm@4-v5.1", []string{"run-pnpm", "4", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
 	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@5-v5.2", []string{"run-pnpm", "5", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
 	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@7-v5.4", []string{"run-pnpm", "7", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
-	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
-	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
+	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, pnpm89Policy},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, pnpm89Policy},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10-v9", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 
 	// --- pnpm v5.3: pnpm@6 (via @pnpm/exe, bundles own Node) ---
@@ -222,11 +231,6 @@ func TestCorrectness(t *testing.T) {
 	skipCombos["pnpm@4-v5.1/pnpm-package-extensions"] = "pnpm@4 doesn't support packageExtensions"
 	skipCombos["pnpm@5-v5.2/pnpm-package-extensions"] = "pnpm@5 doesn't support packageExtensions"
 	skipCombos["pnpm@4-v5.1/pnpm-peer-rules"] = "pnpm@4 doesn't support peerDependencyRules"
-	// pnpm@8 treats ignoreMissing as "don't auto-install this peer" while
-	// pnpm@10 treats it as "suppress error but still auto-install if possible".
-	// locksmith matches pnpm@10 behavior.
-	skipCombos["pnpm@8-v6/pnpm-peer-rules"] = "pnpm@8 treats ignoreMissing as skip-auto-install (pnpm@10 doesn't)"
-
 	// npm@2 handles optional and platform-specific deps differently (excludes
 	// platform-incompatible deps from shrinkwrap).
 	skipCombos["npm@2-shrinkwrap/platform-specific"] = "npm@2 excludes platform-incompatible optional deps"
