@@ -222,9 +222,6 @@ func TestCorrectness(t *testing.T) {
 	skipCombos["pnpm@4-v5.1/pnpm-package-extensions"] = "pnpm@4 doesn't support packageExtensions"
 	skipCombos["pnpm@5-v5.2/pnpm-package-extensions"] = "pnpm@5 doesn't support packageExtensions"
 	skipCombos["pnpm@4-v5.1/pnpm-peer-rules"] = "pnpm@4 doesn't support peerDependencyRules"
-	// pnpm@9 has different peerDependencyRules behavior than pnpm@10.
-	skipCombos["pnpm@9-v9/pnpm-peer-rules"] = "pnpm@9 peer rules resolution differs from pnpm@10"
-
 	// npm@2 handles optional and platform-specific deps differently (excludes
 	// platform-incompatible deps from shrinkwrap).
 	skipCombos["npm@2-shrinkwrap/platform-specific"] = "npm@2 excludes platform-incompatible optional deps"

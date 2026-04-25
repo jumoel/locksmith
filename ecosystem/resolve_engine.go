@@ -533,10 +533,6 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 			if pm, ok := meta.PeerDepsMeta[depName]; ok && pm.Optional {
 				continue
 			}
-			// Skip peers matching peerDependencyRules.ignoreMissing patterns.
-			if s.peerDepRules != nil && s.matchesIgnoreMissing(depName) {
-				continue
-			}
 			// Skip if provided by the project.
 			if s.projectDeps[depName] {
 				continue

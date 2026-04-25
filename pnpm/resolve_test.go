@@ -361,7 +361,8 @@ func TestPnpmResolve_PeerDependencyRules_IgnoreMissing(t *testing.T) {
 		t.Fatal("baseline check failed: B@1.0.0 should be auto-installed without rules")
 	}
 
-	// Now: with ignoreMissing, B should NOT be auto-installed.
+	// With ignoreMissing, B should STILL be auto-installed (ignoreMissing only
+	// suppresses errors when the peer can't be resolved, not auto-installation).
 	projectWithRules := &ecosystem.ProjectSpec{
 		Name:    "test-project",
 		Version: "1.0.0",
@@ -377,14 +378,15 @@ func TestPnpmResolve_PeerDependencyRules_IgnoreMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error (with rules): %v", err)
 	}
-	if _, ok := resultWithRules.Packages["B@1.0.0"]; ok {
-		t.Error("B@1.0.0 should NOT be auto-installed when ignoreMissing includes 'B'")
+	if _, ok := resultWithRules.Packages["B@1.0.0"]; !ok {
+		t.Error("B@1.0.0 should still be auto-installed (ignoreMissing suppresses errors, doesn't prevent installation)")
 	}
 }
 
 func TestPnpmResolve_PeerDependencyRules_IgnoreMissing_Glob(t *testing.T) {
 	// Setup: A@1.0.0 has non-optional peer deps on @babel/core and @babel/parser.
-	// With ignoreMissing: ["@babel/*"], both should be skipped.
+	// With ignoreMissing: ["@babel/*"], both should still be auto-installed (they
+	// exist in the registry). ignoreMissing only suppresses errors for unresolvable peers.
 	reg := newMockRegistry()
 	reg.addVersionWithPeers("A", "1.0.0", baseTime, nil, map[string]string{
 		"@babel/core":   "^7.0.0",
@@ -410,11 +412,12 @@ func TestPnpmResolve_PeerDependencyRules_IgnoreMissing_Glob(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, ok := result.Packages["@babel/core@7.0.0"]; ok {
-		t.Error("@babel/core should NOT be auto-installed when ignoreMissing includes '@babel/*'")
+	// Both should be auto-installed since they exist in the registry.
+	if _, ok := result.Packages["@babel/core@7.0.0"]; !ok {
+		t.Error("@babel/core should be auto-installed (ignoreMissing doesn't prevent installation)")
 	}
-	if _, ok := result.Packages["@babel/parser@7.0.0"]; ok {
-		t.Error("@babel/parser should NOT be auto-installed when ignoreMissing includes '@babel/*'")
+	if _, ok := result.Packages["@babel/parser@7.0.0"]; !ok {
+		t.Error("@babel/parser should be auto-installed (ignoreMissing doesn't prevent installation)")
 	}
 }
 
