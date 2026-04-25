@@ -199,9 +199,14 @@ func TestIntegration(t *testing.T) {
 						// Other PMs (pnpm, bun, yarn berry) require workspace: protocol.
 						if fixture == "workspace-npm-style" {
 							// npm-style workspaces use resolve-by-name for cross-deps.
-							// Only npm and yarn classic support this; others need workspace: protocol.
-							if vc.PMName != "npm" && !(vc.PMName == "yarn" && vc.PMVersion == "1") {
-								t.Skip("workspace-npm-style only supported by npm and yarn classic")
+							// Only yarn classic and npm v3 format (which has workspace placement
+							// support) pass acceptance. Other PMs need workspace: protocol.
+							if vc.PMName == "yarn" && vc.PMVersion == "1" {
+								// yarn classic supports npm-style workspaces
+							} else if vc.PMName == "npm" && vc.Format == locksmith.FormatPackageLockV3 {
+								// npm v3 format has workspace member placement support
+							} else {
+								t.Skip("workspace-npm-style only supported by yarn classic and npm v3")
 							}
 						}
 						if vc.PMName == "pnpm" && vc.PMVersion == "4" {
