@@ -194,10 +194,18 @@ func TestIntegration(t *testing.T) {
 								t.Skip("yarn 2 doesn't support workspace:^ protocol")
 							}
 						}
-						// npm-style fixtures (regular semver ranges) don't work with pnpm (needs workspace: protocol).
+						// npm-style workspace fixtures use regular semver for cross-deps.
+						// Only npm and yarn classic support resolve-by-name.
+						// Other PMs (pnpm, bun, yarn berry) require workspace: protocol.
 						if fixture == "workspace-npm-style" {
 							if vc.PMName == "pnpm" {
 								t.Skip("pnpm requires workspace: protocol for cross-workspace deps")
+							}
+							if vc.PMName == "bun" {
+								t.Skip("bun requires workspace: protocol for cross-workspace deps")
+							}
+							if vc.PMName == "yarn" && vc.PMVersion != "1" {
+								t.Skip("yarn berry requires workspace: protocol for cross-workspace deps")
 							}
 						}
 						if vc.PMName == "pnpm" && vc.PMVersion == "4" {
