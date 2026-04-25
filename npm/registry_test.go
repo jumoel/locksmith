@@ -245,6 +245,109 @@ func TestCaching(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Retry tests
+// ---------------------------------------------------------------------------
+
+func TestRetry_429ThenSuccess(t *testing.T) {
+	isOddData, err := os.ReadFile("testdata/packument-is-odd.json")
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+
+	var reqCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := reqCount.Add(1)
+		if n == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(isOddData)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClient(srv.URL)
+	versions, err := client.FetchVersions(context.Background(), "is-odd", nil)
+	if err != nil {
+		t.Fatalf("expected success after retry, got error: %v", err)
+	}
+	if len(versions) != 4 {
+		t.Fatalf("expected 4 versions, got %d", len(versions))
+	}
+	if got := reqCount.Load(); got != 2 {
+		t.Fatalf("expected exactly 2 requests (1 fail + 1 success), got %d", got)
+	}
+}
+
+func TestRetry_500ThenSuccess(t *testing.T) {
+	isOddData, err := os.ReadFile("testdata/packument-is-odd.json")
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+
+	var reqCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := reqCount.Add(1)
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(isOddData)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClient(srv.URL)
+	versions, err := client.FetchVersions(context.Background(), "is-odd", nil)
+	if err != nil {
+		t.Fatalf("expected success after retry, got error: %v", err)
+	}
+	if len(versions) != 4 {
+		t.Fatalf("expected 4 versions, got %d", len(versions))
+	}
+	if got := reqCount.Load(); got != 2 {
+		t.Fatalf("expected exactly 2 requests (1 fail + 1 success), got %d", got)
+	}
+}
+
+func TestRetry_ExhaustedRetries(t *testing.T) {
+	var reqCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClient(srv.URL)
+	_, err := client.FetchVersions(context.Background(), "is-odd", nil)
+	if err == nil {
+		t.Fatal("expected error after exhausted retries, got nil")
+	}
+	// 1 initial attempt + 3 retries = 4 total requests.
+	if got := reqCount.Load(); got != 4 {
+		t.Fatalf("expected 4 total requests (1 + 3 retries), got %d", got)
+	}
+}
+
+func TestRetry_404NotRetried(t *testing.T) {
+	var reqCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount.Add(1)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClient(srv.URL)
+	_, err := client.FetchVersions(context.Background(), "nonexistent-pkg", nil)
+	if err == nil {
+		t.Fatal("expected error for 404, got nil")
+	}
+	if got := reqCount.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 request (404 should not be retried), got %d", got)
+	}
+}
+
 func TestScopedPackage(t *testing.T) {
 	srv, _ := newTestServer(t)
 	client := NewRegistryClient(srv.URL)

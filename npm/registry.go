@@ -32,6 +32,41 @@ func NewRegistryClient(baseURL string) *RegistryClient {
 	}
 }
 
+// doWithRetry executes an HTTP request with retry and exponential backoff.
+// Retries on 429 (rate limit) and 5xx (server error). All other status codes
+// are returned immediately.
+func (r *RegistryClient) doWithRetry(req *http.Request) (*http.Response, error) {
+	const maxRetries = 3
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			req = req.Clone(req.Context())
+			time.Sleep(retryBackoff(attempt))
+		}
+		resp, err := r.httpClient.Do(req)
+		if err != nil {
+			if attempt == maxRetries {
+				return nil, err
+			}
+			continue
+		}
+		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+			resp.Body.Close()
+			if attempt == maxRetries {
+				return nil, fmt.Errorf("HTTP %d for %s after %d attempts", resp.StatusCode, req.URL.Path, maxRetries+1)
+			}
+			continue
+		}
+		return resp, nil
+	}
+	return nil, fmt.Errorf("retry logic error")
+}
+
+// retryBackoff returns the backoff duration for a given retry attempt (1-indexed).
+// Produces 200ms, 400ms, 800ms for attempts 1, 2, 3.
+func retryBackoff(attempt int) time.Duration {
+	return time.Duration(1<<uint(attempt-1)) * 200 * time.Millisecond
+}
+
 // fetchPackument fetches and caches the full packument for a package.
 func (r *RegistryClient) fetchPackument(ctx context.Context, name string) (*Packument, error) {
 	r.mu.Lock()
@@ -48,7 +83,7 @@ func (r *RegistryClient) fetchPackument(ctx context.Context, name string) (*Pack
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := r.httpClient.Do(req)
+	resp, err := r.doWithRetry(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching packument for %s: %w", name, err)
 	}
