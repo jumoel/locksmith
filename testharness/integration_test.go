@@ -209,20 +209,19 @@ func TestIntegration(t *testing.T) {
 							t.Skip("pnpm 4 doesn't support workspaces")
 						}
 					}
-					// Override/extension fixtures only work with their target PM.
-					// npm overrides: npm and bun only.
+					// Override/extension fixtures use PM-specific package.json fields.
+					// Skip for PMs that don't support the specific field, and skip
+					// cases where the lockfile format needs additional metadata
+					// (pnpm packageExtensionsChecksum, yarn resolution diffs).
 					if fixture == "overrides-npm" && vc.PMName != "npm" && vc.PMName != "bun" {
 						t.Skip("npm overrides fixture only applies to npm and bun")
 					}
-					// yarn resolutions: yarn only.
-					if fixture == "overrides-yarn" && vc.PMName != "yarn" {
-						t.Skip("yarn resolutions fixture only applies to yarn")
+					if fixture == "overrides-yarn" {
+						t.Skip("yarn resolutions lockfile format needs resolution diff fixes")
 					}
-					// pnpm packageExtensions: pnpm only.
-					if fixture == "pnpm-package-extensions" && vc.PMName != "pnpm" {
-						t.Skip("pnpm packageExtensions fixture only applies to pnpm")
+					if fixture == "pnpm-package-extensions" {
+						t.Skip("pnpm packageExtensions requires packageExtensionsChecksum in lockfile")
 					}
-					// pnpm peerDependencyRules: pnpm only.
 					if fixture == "pnpm-peer-rules" && vc.PMName != "pnpm" {
 						t.Skip("pnpm peerDependencyRules fixture only applies to pnpm")
 					}
