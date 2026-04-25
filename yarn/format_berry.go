@@ -609,6 +609,28 @@ func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, constraintKey stri
 		}
 	}
 
+	// dependenciesMeta: mark deps with install scripts as built.
+	var builtDeps []string
+	if node != nil {
+		for _, edge := range node.Dependencies {
+			if edge.Target != nil && edge.Target.HasInstallScript {
+				builtDeps = append(builtDeps, edge.Name)
+			}
+		}
+	}
+	if len(builtDeps) > 0 {
+		sort.Strings(builtDeps)
+		b.WriteString("  dependenciesMeta:\n")
+		for _, name := range builtDeps {
+			yamlName := name
+			if strings.HasPrefix(name, "@") {
+				yamlName = fmt.Sprintf("%q", name)
+			}
+			b.WriteString(fmt.Sprintf("    %s:\n", yamlName))
+			b.WriteString("      built: true\n")
+		}
+	}
+
 	// Checksum: for v6/v8, emit sha512 hex (yarn 3.2+/4 don't validate).
 	// For v4/v5, omit entirely - yarn 2/3.1 compute cache-specific hashes
 	// that can't be derived from registry data. Yarn fills them on install.

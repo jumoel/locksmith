@@ -640,3 +640,197 @@ func TestBerryConstraintPreservation(t *testing.T) {
 		}
 	}
 }
+
+// TestBerryDependenciesMetaBuilt verifies that when a package depends on a
+// dependency with HasInstallScript=true, the parent entry gets a
+// dependenciesMeta section marking that dep as built: true.
+func TestBerryDependenciesMetaBuilt(t *testing.T) {
+	buildNode := &ecosystem.Node{
+		Name:             "build-pkg",
+		Version:          "2.0.0",
+		Integrity:        "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		HasInstallScript: true,
+	}
+
+	parentNode := &ecosystem.Node{
+		Name:      "parent-pkg",
+		Version:   "1.0.0",
+		Integrity: "sha512-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+		Dependencies: []*ecosystem.Edge{
+			{
+				Name:       "build-pkg",
+				Constraint: "^2.0.0",
+				Target:     buildNode,
+				Type:       ecosystem.DepRegular,
+			},
+		},
+	}
+
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test-project",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{
+					Name:       "parent-pkg",
+					Constraint: "^1.0.0",
+					Target:     parentNode,
+					Type:       ecosystem.DepRegular,
+				},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{
+			"parent-pkg@1.0.0": parentNode,
+			"build-pkg@2.0.0":  buildNode,
+		},
+	}
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"parent-pkg@1.0.0": {
+				Node:         parentNode,
+				Dependencies: map[string]string{"build-pkg": "2.0.0"},
+			},
+			"build-pkg@2.0.0": {
+				Node:         buildNode,
+				Dependencies: map[string]string{},
+			},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "parent-pkg", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	formatter := NewYarnBerryV8Formatter()
+	data, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("FormatFromResult failed: %v", err)
+	}
+	output := string(data)
+
+	// The parent-pkg entry must have a dependenciesMeta section marking
+	// build-pkg as built: true.
+	if !strings.Contains(output, "  dependenciesMeta:\n    build-pkg:\n      built: true\n") {
+		t.Errorf("parent-pkg should have dependenciesMeta with build-pkg built: true.\nOutput:\n%s", output)
+	}
+
+	// The dependenciesMeta must appear between the dependencies section
+	// and the checksum/languageName section of parent-pkg.
+	parentIdx := strings.Index(output, "parent-pkg@npm")
+	if parentIdx == -1 {
+		t.Fatal("parent-pkg entry not found in output")
+	}
+	parentSection := output[parentIdx:]
+	nextEntry := strings.Index(parentSection[1:], "\n\n")
+	if nextEntry > 0 {
+		parentSection = parentSection[:nextEntry+1]
+	}
+
+	depsMetaIdx := strings.Index(parentSection, "dependenciesMeta:")
+	checksumIdx := strings.Index(parentSection, "checksum:")
+	langIdx := strings.Index(parentSection, "languageName:")
+	if depsMetaIdx == -1 {
+		t.Fatal("dependenciesMeta not found in parent-pkg entry")
+	}
+	if checksumIdx != -1 && depsMetaIdx > checksumIdx {
+		t.Error("dependenciesMeta should appear before checksum")
+	}
+	if langIdx != -1 && depsMetaIdx > langIdx {
+		t.Error("dependenciesMeta should appear before languageName")
+	}
+}
+
+// TestBerryDependenciesMetaBuilt_NoBuildScripts verifies that when none of a
+// package's dependencies have install scripts, no dependenciesMeta section
+// appears on that package's entry.
+func TestBerryDependenciesMetaBuilt_NoBuildScripts(t *testing.T) {
+	depNode := &ecosystem.Node{
+		Name:             "regular-dep",
+		Version:          "2.0.0",
+		Integrity:        "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		HasInstallScript: false,
+	}
+
+	parentNode := &ecosystem.Node{
+		Name:      "parent-pkg",
+		Version:   "1.0.0",
+		Integrity: "sha512-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+		Dependencies: []*ecosystem.Edge{
+			{
+				Name:       "regular-dep",
+				Constraint: "^2.0.0",
+				Target:     depNode,
+				Type:       ecosystem.DepRegular,
+			},
+		},
+	}
+
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test-project",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{
+					Name:       "parent-pkg",
+					Constraint: "^1.0.0",
+					Target:     parentNode,
+					Type:       ecosystem.DepRegular,
+				},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{
+			"parent-pkg@1.0.0":  parentNode,
+			"regular-dep@2.0.0": depNode,
+		},
+	}
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"parent-pkg@1.0.0": {
+				Node:         parentNode,
+				Dependencies: map[string]string{"regular-dep": "2.0.0"},
+			},
+			"regular-dep@2.0.0": {
+				Node:         depNode,
+				Dependencies: map[string]string{},
+			},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "parent-pkg", Constraint: "^1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	formatter := NewYarnBerryV8Formatter()
+	data, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("FormatFromResult failed: %v", err)
+	}
+	output := string(data)
+
+	// Find the parent-pkg entry specifically and check it has no dependenciesMeta.
+	parentIdx := strings.Index(output, "parent-pkg@npm")
+	if parentIdx == -1 {
+		t.Fatal("parent-pkg entry not found in output")
+	}
+	parentSection := output[parentIdx:]
+	nextEntry := strings.Index(parentSection[1:], "\n\n")
+	if nextEntry > 0 {
+		parentSection = parentSection[:nextEntry+1]
+	}
+
+	if strings.Contains(parentSection, "dependenciesMeta") {
+		t.Errorf("parent-pkg should NOT have dependenciesMeta when no deps have install scripts.\nParent entry:\n%s", parentSection)
+	}
+}
