@@ -41,9 +41,9 @@ var noPeerAutoInstall = &ecosystem.ResolverPolicy{
 	AutoInstallPeers: false,
 }
 
-// pnpm89Policy matches pnpm 8-9 behavior: auto-install peers, but
-// ignoreMissing prevents auto-installation (changed in pnpm 10).
-var pnpm89Policy = &ecosystem.ResolverPolicy{
+// pnpm8Policy matches pnpm 8 behavior: auto-install peers, but
+// ignoreMissing prevents auto-installation (changed in pnpm 9+).
+var pnpm8Policy = &ecosystem.ResolverPolicy{
 	CrossTreeDedup:              true,
 	AutoInstallPeers:            true,
 	SkipOptionalPeerDeps:        true,
@@ -85,8 +85,8 @@ var correctnessMatrix = []correctnessCase{
 	{locksmith.FormatPnpmLockV4, "pnpm-lock.yaml", "pnpm@4-v5.1", []string{"run-pnpm", "4", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
 	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@5-v5.2", []string{"run-pnpm", "5", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
 	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@7-v5.4", []string{"run-pnpm", "7", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
-	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, pnpm89Policy},
-	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, pnpm89Policy},
+	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, pnpm8Policy},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10-v9", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 
 	// --- pnpm v5.3: pnpm@6 (via @pnpm/exe, bundles own Node) ---
