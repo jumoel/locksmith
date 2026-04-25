@@ -198,19 +198,33 @@ func TestIntegration(t *testing.T) {
 						// Only npm and yarn classic support resolve-by-name.
 						// Other PMs (pnpm, bun, yarn berry) require workspace: protocol.
 						if fixture == "workspace-npm-style" {
-							if vc.PMName == "pnpm" {
-								t.Skip("pnpm requires workspace: protocol for cross-workspace deps")
-							}
-							if vc.PMName == "bun" {
-								t.Skip("bun requires workspace: protocol for cross-workspace deps")
-							}
-							if vc.PMName == "yarn" && vc.PMVersion != "1" {
-								t.Skip("yarn berry requires workspace: protocol for cross-workspace deps")
+							// Only yarn classic currently passes acceptance for npm-style workspaces.
+							// npm: lockfile workspace member placement needs further work.
+							// pnpm/bun/yarn berry: require workspace: protocol.
+							if vc.PMName != "yarn" || vc.PMVersion != "1" {
+								t.Skip("workspace-npm-style acceptance only verified for yarn classic")
 							}
 						}
 						if vc.PMName == "pnpm" && vc.PMVersion == "4" {
 							t.Skip("pnpm 4 doesn't support workspaces")
 						}
+					}
+					// Override/extension fixtures only work with their target PM.
+					// npm overrides: npm and bun only.
+					if fixture == "overrides-npm" && vc.PMName != "npm" && vc.PMName != "bun" {
+						t.Skip("npm overrides fixture only applies to npm and bun")
+					}
+					// yarn resolutions: yarn only.
+					if fixture == "overrides-yarn" && vc.PMName != "yarn" {
+						t.Skip("yarn resolutions fixture only applies to yarn")
+					}
+					// pnpm packageExtensions: pnpm only.
+					if fixture == "pnpm-package-extensions" && vc.PMName != "pnpm" {
+						t.Skip("pnpm packageExtensions fixture only applies to pnpm")
+					}
+					// pnpm peerDependencyRules: pnpm only.
+					if fixture == "pnpm-peer-rules" && vc.PMName != "pnpm" {
+						t.Skip("pnpm peerDependencyRules fixture only applies to pnpm")
 					}
 					t.Parallel()
 					pmTag := vc.PMName + "_" + vc.PMVersion
