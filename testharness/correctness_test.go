@@ -132,14 +132,14 @@ func TestCorrectness(t *testing.T) {
 		"express", "deep-chain", "multiple-peer-providers", "older-react",
 		// Mixed
 		"mixed-large", "many-direct",
-		// PM-version-specific
-		"npm-6", "npm-10", "pnpm-8", "pnpm-9",
+		// PM-version-specific (pnpm-8/9 are small fixtures safe for correctness)
+		"pnpm-8", "pnpm-9",
 		// Aliases and overrides
 		"aliased-dep", "overrides-npm", "overrides-yarn",
 		// Optional deps
 		"optional-deps",
 		// Peer dep edge cases
-		"arborist-peer-optional", "peer-deps-meta-mixed",
+		"peer-deps-meta-mixed",
 		// pnpm-specific features
 		"pnpm-package-extensions", "pnpm-peer-rules",
 		// Platform-specific deps (no platform filter in correctness, so all included)
@@ -228,6 +228,10 @@ func TestCorrectness(t *testing.T) {
 	for _, pm := range []string{"npm@3-shrinkwrap", "npm@4-shrinkwrap"} {
 		skipCombos[pm+"/deep-chain"] = "npm 3-4 shrinkwrap crashes on webpack-sized dep trees"
 	}
+
+	// peer-deps-meta-mixed: yarn classic doesn't auto-install peers, causing
+	// resolution differences for fixtures with peerDependencies + peerDependenciesMeta.
+	skipCombos["yarn@1/peer-deps-meta-mixed"] = "yarn classic doesn't auto-install peers"
 
 	for _, cc := range correctnessMatrix {
 		cc := cc

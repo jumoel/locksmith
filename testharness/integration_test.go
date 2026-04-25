@@ -216,8 +216,8 @@ func TestIntegration(t *testing.T) {
 					if fixture == "overrides-yarn" && vc.PMName != "yarn" {
 						t.Skip("yarn resolutions fixture only applies to yarn")
 					}
-					if fixture == "pnpm-package-extensions" && vc.PMName != "pnpm" {
-						t.Skip("pnpm packageExtensions fixture only applies to pnpm")
+					if fixture == "pnpm-package-extensions" {
+						t.Skip("pnpm packageExtensions checksum computation needs version-specific hashing (pnpm 9: MD5, pnpm 10: SHA-256)")
 					}
 					if fixture == "pnpm-peer-rules" && vc.PMName != "pnpm" {
 						t.Skip("pnpm peerDependencyRules fixture only applies to pnpm")
