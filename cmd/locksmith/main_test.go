@@ -185,3 +185,106 @@ func TestGenerateCmd_RealGeneration(t *testing.T) {
 		t.Fatal("output file is empty")
 	}
 }
+
+func TestGenerateCmd_WorkspaceAutoDiscovery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping workspace auto-discovery test in short mode (needs real registry)")
+	}
+
+	// The test binary runs in cmd/locksmith/, so the fixture is two levels up.
+	specFile := "../../testharness/fixtures/workspace-simple/package.json"
+	absSpec, err := filepath.Abs(specFile)
+	if err != nil {
+		t.Fatalf("resolving spec path: %v", err)
+	}
+
+	tmp := t.TempDir()
+	outputFile := filepath.Join(tmp, "bun.lock")
+
+	root := rootCmd()
+	root.SetArgs([]string{"generate", "--spec", absSpec, "--format", "bun-lock", "--output", outputFile})
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("generate command failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("reading output file: %v", err)
+	}
+
+	output := string(data)
+
+	// Workspace members should appear in the lockfile output.
+	// Without auto-discovery, only root deps (is-odd) would be resolved.
+	for _, want := range []string{"@workspace/lib-a", "@workspace/lib-b"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output should contain workspace member %q but does not.\nOutput:\n%s", want, output)
+		}
+	}
+}
+
+func TestGenerateCmd_PnpmWorkspaceYaml(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping pnpm workspace yaml test in short mode (needs real registry)")
+	}
+
+	// Create a temp directory with a root package.json, pnpm-workspace.yaml,
+	// and a workspace member under pkgs/foo/.
+	tmp := t.TempDir()
+
+	rootSpec := `{"name":"pnpm-ws-test","version":"1.0.0","dependencies":{"is-odd":"^3.0.0"}}`
+	if err := os.WriteFile(filepath.Join(tmp, "package.json"), []byte(rootSpec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pnpmWs := "packages:\n  - \"pkgs/*\"\n"
+	if err := os.WriteFile(filepath.Join(tmp, "pnpm-workspace.yaml"), []byte(pnpmWs), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fooDir := filepath.Join(tmp, "pkgs", "foo")
+	if err := os.MkdirAll(fooDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fooSpec := `{"name":"@test/foo","version":"1.0.0","dependencies":{"ms":"^2.1.0"}}`
+	if err := os.WriteFile(filepath.Join(fooDir, "package.json"), []byte(fooSpec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outputFile := filepath.Join(tmp, "bun.lock")
+
+	root := rootCmd()
+	root.SetArgs([]string{
+		"generate",
+		"--spec", filepath.Join(tmp, "package.json"),
+		"--format", "bun-lock",
+		"--output", outputFile,
+	})
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("generate command failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("reading output file: %v", err)
+	}
+
+	output := string(data)
+
+	// The workspace member @test/foo should be discovered via pnpm-workspace.yaml
+	// and its dependency (ms) should appear in the lockfile.
+	if !strings.Contains(output, "@test/foo") {
+		t.Errorf("output should contain workspace member @test/foo but does not.\nOutput:\n%s", output)
+	}
+	if !strings.Contains(output, "ms") {
+		t.Errorf("output should contain dependency 'ms' from workspace member but does not.\nOutput:\n%s", output)
+	}
+}

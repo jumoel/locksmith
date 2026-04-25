@@ -57,13 +57,20 @@ func generateCmd() *cobra.Command {
 				return fmt.Errorf("unknown format %q, valid formats: %s", format, validFormatsStr())
 			}
 
+			// Auto-discover workspace members.
+			members, err := discoverWorkspaceMembers(specPath, specData)
+			if err != nil {
+				return fmt.Errorf("discovering workspace members: %w", err)
+			}
+
 			// Parse cutoff date
 			opts := locksmith.GenerateOptions{
-				SpecFile:     specData,
-				OutputFormat: outputFormat,
-				RegistryURL:  registryURL,
-				Platform:     platform,
-				SpecDir:      filepath.Dir(specPath),
+				SpecFile:         specData,
+				OutputFormat:     outputFormat,
+				RegistryURL:      registryURL,
+				Platform:         platform,
+				SpecDir:          filepath.Dir(specPath),
+				WorkspaceMembers: members,
 			}
 			if cutoffStr != "" {
 				t, err := time.Parse(time.RFC3339, cutoffStr)
