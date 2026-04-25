@@ -194,9 +194,13 @@ func TestCorrectness(t *testing.T) {
 		}
 	}
 
-	// aliased-dep: npm 2/5/6 crash on npm: alias syntax.
-	for _, pm := range []string{"npm@2-shrinkwrap", "npm@5-shrinkwrap", "npm@6-shrinkwrap", "npm@5-v1", "npm@6-v1"} {
-		skipCombos[pm+"/aliased-dep"] = "npm 2/5/6 crashes on npm: alias syntax"
+	// aliased-dep: npm 2-6 crash on npm: alias syntax. npm 3/4 use npm@5 as
+	// fallback for correctness comparison, so they also crash.
+	for _, pm := range []string{
+		"npm@2-shrinkwrap", "npm@3-shrinkwrap", "npm@4-shrinkwrap",
+		"npm@5-shrinkwrap", "npm@6-shrinkwrap", "npm@5-v1", "npm@6-v1",
+	} {
+		skipCombos[pm+"/aliased-dep"] = "npm 2-6 crashes on npm: alias syntax"
 	}
 
 	// yarn resolutions fixture only applies to yarn.
@@ -214,9 +218,17 @@ func TestCorrectness(t *testing.T) {
 		}
 	}
 
-	// pnpm@4 doesn't support packageExtensions or peerDependencyRules.
+	// pnpm@4-5 don't support packageExtensions; pnpm@4 doesn't support peerDependencyRules.
 	skipCombos["pnpm@4-v5.1/pnpm-package-extensions"] = "pnpm@4 doesn't support packageExtensions"
+	skipCombos["pnpm@5-v5.2/pnpm-package-extensions"] = "pnpm@5 doesn't support packageExtensions"
 	skipCombos["pnpm@4-v5.1/pnpm-peer-rules"] = "pnpm@4 doesn't support peerDependencyRules"
+	// pnpm@9 has different peerDependencyRules behavior than pnpm@10.
+	skipCombos["pnpm@9-v9/pnpm-peer-rules"] = "pnpm@9 peer rules resolution differs from pnpm@10"
+
+	// npm@2 handles optional and platform-specific deps differently (excludes
+	// platform-incompatible deps from shrinkwrap).
+	skipCombos["npm@2-shrinkwrap/platform-specific"] = "npm@2 excludes platform-incompatible optional deps"
+	skipCombos["npm@2-shrinkwrap/optional-deps"] = "npm@2 handles optional deps differently"
 
 	// yarn berry v3/v4 patches resolve and adds @types/* auto-types for some fixtures.
 	for _, pm := range []string{"yarn@3-v6", "yarn@4-v8"} {
