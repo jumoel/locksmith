@@ -158,12 +158,17 @@ func TestIntegration(t *testing.T) {
 							t.Skip("npm 2 crashes with ENOTDIR on complex dep trees")
 						}
 					}
-					// non-registry-deps has git+ssh:// deps. The Docker image rewrites
-					// SSH to HTTPS via git config insteadOf, but pnpm and yarn berry
-					// still fail because they resolve git deps differently during
-					// frozen install (they re-resolve rather than trusting the lockfile).
-					if fixture == "non-registry-deps" && (vc.PMName == "pnpm" || (vc.PMName == "yarn" && vc.PMVersion != "1")) {
-						t.Skip("non-registry-deps: pnpm/yarn berry re-resolve git deps during frozen install")
+					// non-registry-deps: pnpm and yarn berry re-resolve git deps during
+					// frozen install even with git insteadOf rewriting SSH to HTTPS.
+					// npm 5-6 ci rejects the lockfile as out-of-sync for git/tarball deps
+					// (v1 lockfile format mismatch for non-registry specifiers).
+					if fixture == "non-registry-deps" {
+						if vc.PMName == "pnpm" || (vc.PMName == "yarn" && vc.PMVersion != "1") {
+							t.Skip("non-registry-deps: pnpm/yarn berry re-resolve git deps during frozen install")
+						}
+						if vc.PMName == "npm" && (vc.PMVersion == "5" || vc.PMVersion == "6") {
+							t.Skip("non-registry-deps: npm 5-6 v1 lockfile format mismatch for git/tarball deps")
+						}
 					}
 					// Yarn berry applies internal patches to typescript and resolve packages.
 					if vc.PMName == "yarn" && vc.PMVersion != "1" {
