@@ -162,7 +162,8 @@ func TestCorrectness(t *testing.T) {
 	// lockfile for the fixture, or where PM defaults differ from our config.
 	skipCombos := map[string]string{
 		// bun and pnpm@4-7 don't produce lockfiles for empty projects
-		"bun/zero-deps":          "bun deletes lockfile for empty projects",
+		"bun@1.2/zero-deps":      "bun deletes lockfile for empty projects",
+		"bun@1.3/zero-deps":      "bun deletes lockfile for empty projects",
 		"pnpm@4-v5.1/zero-deps": "pnpm@4 errors on empty projects",
 		"pnpm@5-v5.2/zero-deps": "pnpm@5 errors on empty projects",
 		"pnpm@6-v5.3/zero-deps": "pnpm@6 errors on empty projects",

@@ -158,10 +158,12 @@ func TestIntegration(t *testing.T) {
 							t.Skip("npm 2 crashes with ENOTDIR on complex dep trees")
 						}
 					}
-					// non-registry-deps has git+ssh:// deps requiring SSH keys unavailable in Docker.
-					// Skip for yarn berry and pnpm (pnpm tries to resolve git+ssh and fails).
+					// non-registry-deps has git+ssh:// deps. The Docker image rewrites
+					// SSH to HTTPS via git config insteadOf, but pnpm and yarn berry
+					// still fail because they resolve git deps differently during
+					// frozen install (they re-resolve rather than trusting the lockfile).
 					if fixture == "non-registry-deps" && (vc.PMName == "pnpm" || (vc.PMName == "yarn" && vc.PMVersion != "1")) {
-						t.Skip("non-registry-deps fixture requires SSH keys for git+ssh:// deps in Docker")
+						t.Skip("non-registry-deps: pnpm/yarn berry re-resolve git deps during frozen install")
 					}
 					// Yarn berry applies internal patches to typescript and resolve packages.
 					if vc.PMName == "yarn" && vc.PMVersion != "1" {
@@ -239,12 +241,7 @@ func TestIntegration(t *testing.T) {
 						}
 					}
 					if fixture == "pnpm-patched" {
-						if vc.PMName != "pnpm" {
-							t.Skip("pnpm patchedDependencies fixture only applies to pnpm")
-						}
-						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" {
-							t.Skip("pnpm patchedDependencies requires pnpm 7+")
-						}
+						t.Skip("pnpm-patched: lockfile format incomplete - pnpm expects patchedDependencies top-level field and patch hash in package keys, not just patched: true flag")
 					}
 					t.Parallel()
 					runVerification(t, vc, fixture)
