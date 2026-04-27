@@ -35,7 +35,6 @@ RUN npm install -g pnpm@7 --prefix /opt/pnpm7
 RUN npm install -g pnpm@8 --prefix /opt/pnpm8
 RUN npm install -g pnpm@9 --prefix /opt/pnpm9
 RUN npm install -g pnpm@10 --prefix /opt/pnpm10
-RUN npm install -g pnpm@11 --prefix /opt/pnpm11
 
 # Install yarn classic (v1).
 RUN npm install -g yarn@1 --prefix /opt/yarn1

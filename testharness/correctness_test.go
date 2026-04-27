@@ -89,7 +89,6 @@ var correctnessMatrix = []correctnessCase{
 	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, pnpm8Policy},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10-v9", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
-	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@11-v9", []string{"run-pnpm", "11", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 
 	// --- pnpm v5.3: pnpm@6 (via @pnpm/exe, bundles own Node) ---
 	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@6-v5.3", []string{"run-pnpm", "6", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},

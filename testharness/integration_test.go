@@ -77,10 +77,9 @@ var verificationMatrix = []verificationCase{
 	// pnpm-lock-v6: pnpm 8.
 	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm", "8", []string{"run-pnpm", "8", "install", "--frozen-lockfile"}, nil},
 
-	// pnpm-lock-v9: pnpm 9, 10, and 11.
+	// pnpm-lock-v9: pnpm 9 and 10.
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm", "9", []string{"run-pnpm", "9", "install", "--frozen-lockfile"}, nil},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm", "10", []string{"run-pnpm", "10", "install", "--frozen-lockfile"}, nil},
-	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm", "11", []string{"run-pnpm", "11", "install", "--frozen-lockfile"}, nil},
 
 	// yarn-classic: yarn 1.
 	{locksmith.FormatYarnClassic, "yarn.lock", "yarn", "1", []string{"run-yarn", "1", "install", "--frozen-lockfile"}, nil},

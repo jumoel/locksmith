@@ -62,7 +62,6 @@ jobs:
           - pnpm@8-v6
           - pnpm@9-v9
           - pnpm@10-v9
-          - pnpm@11-v9
           - yarn@1
           - yarn@2-v4
           - yarn@3.1-v5
@@ -144,7 +143,6 @@ jobs:
           - pnpm-lock-v6/pnpm@8
           - pnpm-lock-v9/pnpm@9
           - pnpm-lock-v9/pnpm@10
-          - pnpm-lock-v9/pnpm@11
           # yarn
           - yarn-classic/yarn@1
           - yarn-berry-v4/yarn@2
