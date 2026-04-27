@@ -242,8 +242,11 @@ func TestIntegration(t *testing.T) {
 						if vc.PMName != "pnpm" {
 							t.Skip("pnpm patchedDependencies fixture only applies to pnpm")
 						}
-						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" {
-							t.Skip("pnpm patchedDependencies requires pnpm 7+")
+						// pnpm 7-9 use a different patch hash format (short hash, not
+						// full SHA256 hex). The lockfile format matches pnpm 10+.
+						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" ||
+							vc.PMVersion == "7" || vc.PMVersion == "8" || vc.PMVersion == "9" {
+							t.Skip("pnpm-patched: pnpm 7-9 use different patch hash format than pnpm 10+")
 						}
 					}
 					t.Parallel()
