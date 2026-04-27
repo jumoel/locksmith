@@ -80,7 +80,8 @@ func buildV1DepEntry(placed *PlacedNode, depName string) orderedjson.Map {
 	node := placed.Node
 
 	// Aliases: when the dep name differs from the node's real name.
-	if depName != node.Name && !strings.HasPrefix(node.TarballURL, "file:") && !strings.HasPrefix(node.TarballURL, "git+") {
+	// Exclude non-registry deps (file:, git+, github:) which have their own handling below.
+	if depName != node.Name && !strings.HasPrefix(node.TarballURL, "file:") && !strings.HasPrefix(node.TarballURL, "git+") && !strings.HasPrefix(node.TarballURL, "github:") {
 		// npm: aliases use "npm:real-name@version" as the version string.
 		// Tarball URL aliases use the tarball URL directly.
 		version := node.TarballURL

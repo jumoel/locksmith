@@ -344,3 +344,60 @@ func TestPackageLockV1_AliasedDep(t *testing.T) {
 
 	t.Logf("Output:\n%s", data)
 }
+
+func TestPackageLockV1_GitHubShorthandDep(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-odd", "3.0.1", baseTime, nil)
+
+	// Simulate a github: dep where depName differs from resolved name.
+	// The resolve engine creates a node with TarballURL = "github:owner/repo".
+	project := &ecosystem.ProjectSpec{
+		Name:    "github-dep-test",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "git-pkg", Constraint: "github:jonschlinkert/is-odd", Type: ecosystem.DepRegular},
+		},
+	}
+
+	r := NewResolver()
+	result, err := r.ResolveWithPlacement(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	// The resolver sets TarballURL to git+ssh:// for github: deps, but for
+	// the v1 format test we need to check what happens when TarballURL is
+	// the github: shorthand. Manually set it to test the formatter path.
+	for _, placed := range result.PlacedNodes {
+		if placed.Node.Name == "is-odd" {
+			placed.Node.TarballURL = "github:jonschlinkert/is-odd"
+			placed.Node.Version = "0.0.0-local"
+		}
+	}
+
+	formatter := NewPackageLockV1Formatter()
+	data, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, data)
+	}
+
+	deps := raw["dependencies"].(map[string]interface{})
+
+	// The dependency should be keyed by the declared name.
+	entry, ok := deps["git-pkg"].(map[string]interface{})
+	if !ok {
+		t.Fatal("git-pkg not found in dependencies")
+	}
+
+	// github: deps must use the original URL as version, NOT "npm:is-odd@0.0.0-local".
+	if entry["version"] != "github:jonschlinkert/is-odd" {
+		t.Errorf("version = %v, want github:jonschlinkert/is-odd", entry["version"])
+	}
+
+	t.Logf("Output:\n%s", data)
+}

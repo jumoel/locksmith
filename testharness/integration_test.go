@@ -158,17 +158,10 @@ func TestIntegration(t *testing.T) {
 							t.Skip("npm 2 crashes with ENOTDIR on complex dep trees")
 						}
 					}
-					// non-registry-deps: pnpm and yarn berry re-resolve git deps during
-					// frozen install even with git insteadOf rewriting SSH to HTTPS.
-					// npm 5-6 ci rejects the lockfile as out-of-sync for git/tarball deps
-					// (v1 lockfile format mismatch for non-registry specifiers).
-					if fixture == "non-registry-deps" {
-						if vc.PMName == "pnpm" || (vc.PMName == "yarn" && vc.PMVersion != "1") {
-							t.Skip("non-registry-deps: pnpm/yarn berry re-resolve git deps during frozen install")
-						}
-						if vc.PMName == "npm" && (vc.PMVersion == "5" || vc.PMVersion == "6") {
-							t.Skip("non-registry-deps: npm 5-6 v1 lockfile format mismatch for git/tarball deps")
-						}
+					// non-registry-deps: pnpm and yarn berry resolve git URLs internally,
+					// bypassing git's insteadOf config that rewrites SSH to HTTPS.
+					if fixture == "non-registry-deps" && (vc.PMName == "pnpm" || (vc.PMName == "yarn" && vc.PMVersion != "1")) {
+						t.Skip("non-registry-deps: pnpm/yarn berry resolve git URLs internally, bypassing git insteadOf config")
 					}
 					// Yarn berry applies internal patches to typescript and resolve packages.
 					if vc.PMName == "yarn" && vc.PMVersion != "1" {
@@ -249,11 +242,9 @@ func TestIntegration(t *testing.T) {
 						if vc.PMName != "pnpm" {
 							t.Skip("pnpm patchedDependencies fixture only applies to pnpm")
 						}
-						// pnpm computes its own patch hash from the file on disk and
-						// compares it against the lockfile's patchedDependencies value.
-						// Until locksmith replicates pnpm's exact hashing algorithm,
-						// the hashes won't match during frozen install.
-						t.Skip("pnpm-patched: patch hash computation doesn't match pnpm's algorithm yet")
+						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" {
+							t.Skip("pnpm patchedDependencies requires pnpm 7+")
+						}
 					}
 					t.Parallel()
 					runVerification(t, vc, fixture)
