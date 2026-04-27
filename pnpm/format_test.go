@@ -587,6 +587,7 @@ func TestPnpmLockV9_PatchedDependency(t *testing.T) {
 	reg.addVersion("is-odd", "3.0.1", baseTime, map[string]string{"is-number": "^7.0.0"})
 	reg.addVersion("is-number", "7.0.0", baseTime, nil)
 
+	patchHash := "68ebc232025360cb3dcd3081f4067f4e9fc022ab6b6f71a3230e86c7a5b337d1"
 	project := &ecosystem.ProjectSpec{
 		Name:    "test-project",
 		Version: "1.0.0",
@@ -604,6 +605,15 @@ func TestPnpmLockV9_PatchedDependency(t *testing.T) {
 		t.Fatalf("resolve failed: %v", err)
 	}
 
+	// Simulate computePatchHashes (normally done by locksmith.go).
+	result.PatchHashes = make(map[string]string)
+	for key, pkg := range result.Packages {
+		if pkg.Node.Patched {
+			pkg.Node.PatchHash = patchHash
+			result.PatchHashes[key] = patchHash
+		}
+	}
+
 	formatter := NewPnpmLockV9Formatter()
 	output, err := formatter.FormatFromResult(result, project)
 	if err != nil {
@@ -611,13 +621,31 @@ func TestPnpmLockV9_PatchedDependency(t *testing.T) {
 	}
 
 	yaml := string(output)
+	t.Logf("Generated YAML:\n%s", yaml)
 
-	// The packages section for is-odd@3.0.1 should contain "patched: true".
-	if !strings.Contains(yaml, "patched: true") {
-		t.Error("expected 'patched: true' in output for is-odd@3.0.1")
+	// patchedDependencies top-level field with hash.
+	if !strings.Contains(yaml, "patchedDependencies:") {
+		t.Error("expected patchedDependencies top-level field")
+	}
+	if !strings.Contains(yaml, "is-odd@3.0.1: "+patchHash) {
+		t.Error("expected patch hash in patchedDependencies field")
 	}
 
-	t.Logf("Generated YAML:\n%s", yaml)
+	// Package key should include patch_hash suffix.
+	patchKeySuffix := "(patch_hash=" + patchHash + ")"
+	if !strings.Contains(yaml, "is-odd@3.0.1"+patchKeySuffix) {
+		t.Errorf("expected patch_hash suffix in package key, looking for is-odd@3.0.1%s", patchKeySuffix)
+	}
+
+	// patched: true still present.
+	if !strings.Contains(yaml, "patched: true") {
+		t.Error("expected 'patched: true' in output")
+	}
+
+	// Importer version should include patch_hash.
+	if !strings.Contains(yaml, "version: 3.0.1"+patchKeySuffix) {
+		t.Error("expected patch_hash in importer version")
+	}
 }
 
 func TestPnpmLockV5_PatchedDependency(t *testing.T) {

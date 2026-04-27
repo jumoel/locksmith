@@ -7,7 +7,11 @@ package locksmith
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/jumoel/locksmith/bun"
 	"github.com/jumoel/locksmith/ecosystem"
@@ -283,6 +287,21 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
 	}
 
+	// Compute patch hashes for patched nodes by reading patch files from disk.
+	// Store hashes on both the nodes and the result for formatter access.
+	if spec.PatchedDependencies != nil && opts.SpecDir != "" {
+		computePatchHashes(result.Graph, spec.PatchedDependencies, opts.SpecDir)
+		patchHashes := make(map[string]string)
+		for key, pkg := range result.Packages {
+			if pkg.Node.Patched && pkg.Node.PatchHash != "" {
+				patchHashes[key] = pkg.Node.PatchHash
+			}
+		}
+		if len(patchHashes) > 0 {
+			result.PatchHashes = patchHashes
+		}
+	}
+
 	removed, err := applyPlatformFilter(result.Graph, opts.Platform)
 	if err != nil {
 		return nil, fmt.Errorf("filtering by platform: %w", err)
@@ -513,4 +532,21 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	}
 
 	return &GenerateResult{Lockfile: lockfile, Graph: result.Graph}, nil
+}
+
+// computePatchHashes reads patch files from disk and sets PatchHash on nodes.
+func computePatchHashes(graph *ecosystem.Graph, patchedDeps map[string]string, specDir string) {
+	for key, patchPath := range patchedDeps {
+		node, ok := graph.Nodes[key]
+		if !ok || !node.Patched {
+			continue
+		}
+		absPath := filepath.Join(specDir, patchPath)
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			continue
+		}
+		h := sha256.Sum256(data)
+		node.PatchHash = hex.EncodeToString(h[:])
+	}
 }

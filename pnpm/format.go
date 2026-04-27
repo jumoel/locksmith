@@ -60,6 +60,15 @@ func (f *PnpmLockV9Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 	addMapping(root, "settings", settings)
 
+	// patchedDependencies (only if there are patched deps with hashes)
+	if len(result.PatchHashes) > 0 {
+		patchedNode := &yaml.Node{Kind: yaml.MappingNode}
+		for _, key := range maputil.SortedMapKeys(result.PatchHashes) {
+			addMapping(patchedNode, key, scalarNode(result.PatchHashes[key], 0))
+		}
+		addMapping(root, "patchedDependencies", patchedNode)
+	}
+
 	// importers
 	importers := &yaml.Node{Kind: yaml.MappingNode}
 	importerDot := buildImporter(project, result)
@@ -318,6 +327,17 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 			}
 		}
 
+		// Append patch hash suffix for patched dependencies.
+		if result.PatchHashes != nil {
+			lookupKey := name + "@" + resolvedVersion
+			if targetName != "" && targetName != name {
+				lookupKey = targetName + "@" + resolvedVersion
+			}
+			if hash, ok := result.PatchHashes[lookupKey]; ok {
+				versionValue += "(patch_hash=" + hash + ")"
+			}
+		}
+
 		depNode := &yaml.Node{Kind: yaml.MappingNode}
 		addMapping(depNode, "specifier", specifierNode(constraint))
 		addMapping(depNode, "version", scalarNode(versionValue, 0))
@@ -330,6 +350,7 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 // pnpmPackageKey returns the pnpm v9 package key for a resolved package.
 // For git deps: name@git+https://...#hash
 // For file: deps: name@file:path
+// For patched deps: name@version(patch_hash=hash)
 // For regular deps: name@version
 func pnpmPackageKey(pkg *ResolvedPackage) string {
 	url := pkg.Node.TarballURL
@@ -339,7 +360,11 @@ func pnpmPackageKey(pkg *ResolvedPackage) string {
 	if strings.HasPrefix(url, "file:") {
 		return pkg.Node.Name + "@" + url
 	}
-	return pkg.Node.Name + "@" + pkg.Node.Version
+	key := pkg.Node.Name + "@" + pkg.Node.Version
+	if pkg.Node.Patched && pkg.Node.PatchHash != "" {
+		key += "(patch_hash=" + pkg.Node.PatchHash + ")"
+	}
+	return key
 }
 
 // buildPackages constructs the packages section with resolution info only.

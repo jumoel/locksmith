@@ -246,7 +246,12 @@ func TestIntegration(t *testing.T) {
 						}
 					}
 					if fixture == "pnpm-patched" {
-						t.Skip("pnpm-patched: lockfile format incomplete - pnpm expects patchedDependencies top-level field and patch hash in package keys, not just patched: true flag")
+						if vc.PMName != "pnpm" {
+							t.Skip("pnpm patchedDependencies fixture only applies to pnpm")
+						}
+						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" {
+							t.Skip("pnpm patchedDependencies requires pnpm 7+")
+						}
 					}
 					t.Parallel()
 					runVerification(t, vc, fixture)

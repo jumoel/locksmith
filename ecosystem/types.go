@@ -49,6 +49,9 @@ type Node struct {
 	WorkspacePath string
 	// Patched indicates this package has a pnpm patch applied.
 	Patched bool
+	// PatchHash is the hex-encoded SHA256 hash of the patch file contents.
+	// Non-empty only when Patched is true and the patch file was readable.
+	PatchHash string
 }
 
 // Edge represents a dependency relationship.

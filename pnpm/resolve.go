@@ -21,6 +21,9 @@ type ResolveResult struct {
 	Graph *ecosystem.Graph
 	// Packages maps "name@version" to resolved metadata.
 	Packages map[string]*ResolvedPackage
+	// PatchHashes maps "name@version" to the SHA256 hash of the patch file.
+	// Set by the caller after resolution for patched dependencies.
+	PatchHashes map[string]string
 }
 
 // ResolvedPackage holds pnpm-specific resolution info for a package.
