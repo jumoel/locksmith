@@ -702,13 +702,12 @@ func TestPnpmLockV9_PatchedDependency_MD5Base32(t *testing.T) {
 
 	patchKeySuffix := "(patch_hash=" + md5Hash + ")"
 
-	// patchedDependencies should use flat hash string for pnpm 9 format.
-	if !strings.Contains(yaml, "is-odd@3.0.1: "+md5Hash) {
-		t.Error("expected flat hash string in patchedDependencies for MD5Base32 mode")
+	// patchedDependencies uses nested {hash, path} for all pnpm versions.
+	if !strings.Contains(yaml, "hash: "+md5Hash) {
+		t.Error("expected hash field with MD5 base32 value in patchedDependencies")
 	}
-	// Should NOT have nested hash/path fields.
-	if strings.Contains(yaml, "hash: ") {
-		t.Error("MD5Base32 mode should use flat hash, not nested {hash, path}")
+	if !strings.Contains(yaml, "path: patches/is-odd@3.0.1.patch") {
+		t.Error("expected path field in patchedDependencies")
 	}
 
 	// Snapshots key should have the hash suffix.

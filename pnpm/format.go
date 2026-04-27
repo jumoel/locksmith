@@ -60,24 +60,19 @@ func (f *PnpmLockV9Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 	addMapping(root, "settings", settings)
 
-	// patchedDependencies field format depends on PM version:
-	// pnpm 10+: nested {hash, path} objects
-	// pnpm 7-9: flat hash string
+	// patchedDependencies: nested {hash, path} objects (same structure for all pnpm versions).
+	// The hash encoding differs: MD5+base32 for pnpm 7-9, SHA256 hex for pnpm 10+.
 	if len(result.PatchHashes) > 0 {
 		patchedNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, key := range maputil.SortedMapKeys(result.PatchHashes) {
-			if result.PatchHashEncoding == PatchHashMD5Base32 {
-				addMapping(patchedNode, key, scalarNode(result.PatchHashes[key], 0))
-			} else {
-				entryNode := &yaml.Node{Kind: yaml.MappingNode}
-				addMapping(entryNode, "hash", scalarNode(result.PatchHashes[key], 0))
-				if project.PatchedDependencies != nil {
-					if path, ok := project.PatchedDependencies[key]; ok {
-						addMapping(entryNode, "path", scalarNode(path, 0))
-					}
+			entryNode := &yaml.Node{Kind: yaml.MappingNode}
+			addMapping(entryNode, "hash", scalarNode(result.PatchHashes[key], 0))
+			if project.PatchedDependencies != nil {
+				if path, ok := project.PatchedDependencies[key]; ok {
+					addMapping(entryNode, "path", scalarNode(path, 0))
 				}
-				addMapping(patchedNode, key, entryNode)
 			}
+			addMapping(patchedNode, key, entryNode)
 		}
 		addMapping(root, "patchedDependencies", patchedNode)
 	}
