@@ -16,14 +16,26 @@ func NewResolver() *Resolver {
 	return &Resolver{}
 }
 
+// PatchHashEncoding controls how patch file hashes are computed.
+type PatchHashEncoding int
+
+const (
+	// PatchHashSHA256Hex uses SHA256 with hex encoding (pnpm 10+).
+	PatchHashSHA256Hex PatchHashEncoding = iota
+	// PatchHashMD5Base32 uses MD5 with base32 lowercase encoding (pnpm 7-9).
+	PatchHashMD5Base32
+)
+
 // ResolveResult holds the pnpm-specific resolution output.
 type ResolveResult struct {
 	Graph *ecosystem.Graph
 	// Packages maps "name@version" to resolved metadata.
 	Packages map[string]*ResolvedPackage
-	// PatchHashes maps "name@version" to the SHA256 hash of the patch file.
+	// PatchHashes maps "name@version" to the encoded hash of the patch file.
 	// Set by the caller after resolution for patched dependencies.
 	PatchHashes map[string]string
+	// PatchHashEncoding controls the hash algorithm used for PatchHashes.
+	PatchHashEncoding PatchHashEncoding
 }
 
 // ResolvedPackage holds pnpm-specific resolution info for a package.

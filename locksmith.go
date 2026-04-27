@@ -7,11 +7,13 @@ package locksmith
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jumoel/locksmith/bun"
 	"github.com/jumoel/locksmith/ecosystem"
@@ -290,7 +292,11 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 	// Compute patch hashes for patched nodes by reading patch files from disk.
 	// Store hashes on both the nodes and the result for formatter access.
 	if spec.PatchedDependencies != nil && opts.SpecDir != "" {
-		computePatchHashes(result.Graph, spec.PatchedDependencies, opts.SpecDir)
+		hashEncoding := pnpm.PatchHashSHA256Hex
+		if opts.PnpmPatchHashMD5 {
+			hashEncoding = pnpm.PatchHashMD5Base32
+		}
+		computePatchHashes(result.Graph, spec.PatchedDependencies, opts.SpecDir, hashEncoding)
 		patchHashes := make(map[string]string)
 		for key, pkg := range result.Packages {
 			if pkg.Node.Patched && pkg.Node.PatchHash != "" {
@@ -299,6 +305,7 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		}
 		if len(patchHashes) > 0 {
 			result.PatchHashes = patchHashes
+			result.PatchHashEncoding = hashEncoding
 		}
 	}
 
@@ -535,7 +542,7 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 }
 
 // computePatchHashes reads patch files from disk and sets PatchHash on nodes.
-func computePatchHashes(graph *ecosystem.Graph, patchedDeps map[string]string, specDir string) {
+func computePatchHashes(graph *ecosystem.Graph, patchedDeps map[string]string, specDir string, encoding pnpm.PatchHashEncoding) {
 	for key, patchPath := range patchedDeps {
 		node, ok := graph.Nodes[key]
 		if !ok || !node.Patched {
@@ -546,7 +553,35 @@ func computePatchHashes(graph *ecosystem.Graph, patchedDeps map[string]string, s
 		if err != nil {
 			continue
 		}
-		h := sha256.Sum256(data)
-		node.PatchHash = hex.EncodeToString(h[:])
+		// Normalize CRLF to LF (matches pnpm's readNormalizedFile).
+		content := strings.ReplaceAll(string(data), "\r\n", "\n")
+		switch encoding {
+		case pnpm.PatchHashMD5Base32:
+			h := md5.Sum([]byte(content))
+			node.PatchHash = base32Encode(h[:])
+		default:
+			h := sha256.Sum256([]byte(content))
+			node.PatchHash = hex.EncodeToString(h[:])
+		}
 	}
+}
+
+// base32Encode encodes bytes to lowercase base32 (RFC 4648) without padding.
+func base32Encode(data []byte) string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+	var result []byte
+	bits := 0
+	value := 0
+	for _, b := range data {
+		value = (value << 8) | int(b)
+		bits += 8
+		for bits >= 5 {
+			result = append(result, alphabet[(value>>(bits-5))&31])
+			bits -= 5
+		}
+	}
+	if bits > 0 {
+		result = append(result, alphabet[(value<<(5-bits))&31])
+	}
+	return string(result)
 }

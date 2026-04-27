@@ -314,6 +314,11 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 		SpecDir:        filepath.Join("fixtures", fixture),
 	}
 
+	// pnpm 7-9 use MD5+base32 for patch hashes; pnpm 10+ uses SHA256 hex.
+	if strings.HasPrefix(cc.PMLabel, "pnpm@7") || strings.HasPrefix(cc.PMLabel, "pnpm@8") || strings.HasPrefix(cc.PMLabel, "pnpm@9") {
+		opts.PnpmPatchHashMD5 = true
+	}
+
 	// Detect workspace fixtures and pass workspace members.
 	fixtureDir := filepath.Join("fixtures", fixture)
 	if members := discoverWorkspaceMembersCorrectness(t, fixtureDir, specData); len(members) > 0 {

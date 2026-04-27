@@ -106,4 +106,9 @@ type GenerateOptions struct {
 	// for the unnamed catalog:) to package name -> version constraint.
 	// Typically parsed from pnpm-workspace.yaml by the CLI.
 	Catalogs map[string]map[string]string
+
+	// PnpmPatchHashMD5 selects MD5+base32 patch hash encoding (pnpm 7-9)
+	// instead of the default SHA256 hex (pnpm 10+). Only affects pnpm lockfile
+	// generation when PatchedDependencies are present.
+	PnpmPatchHashMD5 bool
 }

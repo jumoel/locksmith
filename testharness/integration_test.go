@@ -242,11 +242,8 @@ func TestIntegration(t *testing.T) {
 						if vc.PMName != "pnpm" {
 							t.Skip("pnpm patchedDependencies fixture only applies to pnpm")
 						}
-						// pnpm 7-9 use a different patch hash format (short hash, not
-						// full SHA256 hex). The lockfile format matches pnpm 10+.
-						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" ||
-							vc.PMVersion == "7" || vc.PMVersion == "8" || vc.PMVersion == "9" {
-							t.Skip("pnpm-patched: pnpm 7-9 use different patch hash format than pnpm 10+")
+						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" {
+							t.Skip("pnpm patchedDependencies requires pnpm 7+")
 						}
 					}
 					t.Parallel()
@@ -299,6 +296,11 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 	// Detect workspace fixtures and pass workspace members.
 	if members := discoverWorkspaceMembersInteg(t, fixtureDir, specData); len(members) > 0 {
 		opts.WorkspaceMembers = members
+	}
+
+	// pnpm 7-9 use MD5+base32 for patch hashes; pnpm 10+ uses SHA256 hex.
+	if vc.PMName == "pnpm" && (vc.PMVersion == "7" || vc.PMVersion == "8" || vc.PMVersion == "9") {
+		opts.PnpmPatchHashMD5 = true
 	}
 
 	// Detect pnpm catalogs from pnpm-workspace.yaml.

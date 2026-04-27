@@ -657,6 +657,73 @@ func TestPnpmLockV9_PatchedDependency(t *testing.T) {
 	}
 }
 
+func TestPnpmLockV9_PatchedDependency_MD5Base32(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-odd", "3.0.1", baseTime, map[string]string{"is-number": "^7.0.0"})
+	reg.addVersion("is-number", "7.0.0", baseTime, nil)
+
+	// MD5+base32 hash for the same content as the SHA256 test.
+	md5Hash := "aaaabbbbccccddddeeeefffff2222333"
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "is-odd", Constraint: "3.0.1", Type: ecosystem.DepRegular},
+		},
+		PatchedDependencies: map[string]string{
+			"is-odd@3.0.1": "patches/is-odd@3.0.1.patch",
+		},
+	}
+
+	resolver := NewResolver()
+	result, err := resolver.ResolveForLockfile(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	// Simulate MD5+base32 hashing (normally done by locksmith.go).
+	result.PatchHashes = make(map[string]string)
+	result.PatchHashEncoding = PatchHashMD5Base32
+	for key, pkg := range result.Packages {
+		if pkg.Node.Patched {
+			pkg.Node.PatchHash = md5Hash
+			result.PatchHashes[key] = md5Hash
+		}
+	}
+
+	formatter := NewPnpmLockV9Formatter()
+	output, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	yaml := string(output)
+	t.Logf("Generated YAML:\n%s", yaml)
+
+	patchKeySuffix := "(patch_hash=" + md5Hash + ")"
+
+	// patchedDependencies should use flat hash string for pnpm 9 format.
+	if !strings.Contains(yaml, "is-odd@3.0.1: "+md5Hash) {
+		t.Error("expected flat hash string in patchedDependencies for MD5Base32 mode")
+	}
+	// Should NOT have nested hash/path fields.
+	if strings.Contains(yaml, "hash: ") {
+		t.Error("MD5Base32 mode should use flat hash, not nested {hash, path}")
+	}
+
+	// Snapshots key should have the hash suffix.
+	snapshotsIdx := strings.Index(yaml, "snapshots:")
+	snapshotsSection := yaml[snapshotsIdx:]
+	if !strings.Contains(snapshotsSection, "is-odd@3.0.1"+patchKeySuffix) {
+		t.Error("expected patch_hash suffix in snapshots key")
+	}
+
+	// Importer version should include patch_hash.
+	if !strings.Contains(yaml, "version: 3.0.1"+patchKeySuffix) {
+		t.Error("expected patch_hash in importer version")
+	}
+}
+
 func TestPnpmLockV5_PatchedDependency(t *testing.T) {
 	reg := newMockRegistry()
 	reg.addVersion("is-odd", "3.0.1", baseTime, map[string]string{"is-number": "^7.0.0"})
