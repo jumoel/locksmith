@@ -776,7 +776,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 			v := buildV5PackageKey(targetName, version)
 			if result.PatchHashes != nil {
 				if hash, ok := result.PatchHashes[targetName+"@"+version]; ok {
-					v += "_" + hash
+					v += "(patch_hash=" + hash + ")"
 				}
 			}
 			return v
@@ -785,7 +785,7 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 		if result.PatchHashes != nil {
 			lookupKey := depName + "@" + version
 			if hash, ok := result.PatchHashes[lookupKey]; ok {
-				v += "_" + hash
+				v += "(patch_hash=" + hash + ")"
 			}
 		}
 		return v
@@ -848,9 +848,9 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 		} else {
 			v5Key = buildV5PackageKey(pkg.Node.Name, pkg.Node.Version)
 		}
-		// Patched deps: append _hash suffix to key.
+		// Patched deps: append (patch_hash=...) suffix to key.
 		if pkg.Node.Patched && pkg.Node.PatchHash != "" {
-			v5Key += "_" + pkg.Node.PatchHash
+			v5Key += "(patch_hash=" + pkg.Node.PatchHash + ")"
 		}
 		pkgNode := buildInlinePackageNode(pkg, devFlags[key])
 		addMapping(packagesNode, v5Key, pkgNode)
@@ -957,9 +957,9 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 		} else {
 			pkgKey = buildV6PackageKey(pkg.Node.Name, pkg.Node.Version)
 		}
-		// Patched deps: append _hash suffix to key.
+		// Patched deps: append (patch_hash=...) suffix to key.
 		if pkg.Node.Patched && pkg.Node.PatchHash != "" {
-			pkgKey += "_" + pkg.Node.PatchHash
+			pkgKey += "(patch_hash=" + pkg.Node.PatchHash + ")"
 		}
 		pkgNode := buildInlinePackageNode(pkg, devFlags[key])
 		addMapping(packagesNode, pkgKey, pkgNode)
