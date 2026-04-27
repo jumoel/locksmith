@@ -242,12 +242,8 @@ func TestIntegration(t *testing.T) {
 						if vc.PMName != "pnpm" {
 							t.Skip("pnpm patchedDependencies fixture only applies to pnpm")
 						}
-						// pnpm 4-6 don't support patchedDependencies.
-						// pnpm 7-8 use older lockfile formats (v5/v6) where the patched
-						// deps format differs from v9. Only v9 format is implemented.
-						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" ||
-							vc.PMVersion == "7" || vc.PMVersion == "8" {
-							t.Skip("pnpm-patched: only v9 lockfile format (pnpm 9-10) is supported")
+						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" {
+							t.Skip("pnpm patchedDependencies requires pnpm 7+")
 						}
 					}
 					t.Parallel()

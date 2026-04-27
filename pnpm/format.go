@@ -740,6 +740,22 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 	addMapping(root, "specifiers", specNode)
 
+	// patchedDependencies: nested {hash, path} objects (pnpm 7+ v5 lockfile).
+	if len(result.PatchHashes) > 0 {
+		patchedNode := &yaml.Node{Kind: yaml.MappingNode}
+		for _, key := range maputil.SortedMapKeys(result.PatchHashes) {
+			entryNode := &yaml.Node{Kind: yaml.MappingNode}
+			addMapping(entryNode, "hash", scalarNode(result.PatchHashes[key], 0))
+			if project.PatchedDependencies != nil {
+				if path, ok := project.PatchedDependencies[key]; ok {
+					addMapping(entryNode, "path", scalarNode(path, 0))
+				}
+			}
+			addMapping(patchedNode, key, entryNode)
+		}
+		addMapping(root, "patchedDependencies", patchedNode)
+	}
+
 	// v5DepValue returns the dependency value for the v5 format.
 	v5DepValue := func(depName string) string {
 		version := rootVersions[depName]
@@ -757,9 +773,22 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 		}
 		// Aliases (dep name != target name): use the /target-name/version path.
 		if targetName != "" && targetName != depName {
-			return buildV5PackageKey(targetName, version)
+			v := buildV5PackageKey(targetName, version)
+			if result.PatchHashes != nil {
+				if hash, ok := result.PatchHashes[targetName+"@"+version]; ok {
+					v += "_" + hash
+				}
+			}
+			return v
 		}
-		return version
+		v := version
+		if result.PatchHashes != nil {
+			lookupKey := depName + "@" + version
+			if hash, ok := result.PatchHashes[lookupKey]; ok {
+				v += "_" + hash
+			}
+		}
+		return v
 	}
 
 	// dependencies: map of regular dep names to resolved versions.
@@ -815,10 +844,13 @@ func (f *PnpmLockV5Formatter) FormatFromResult(result *ResolveResult, project *e
 		}
 		var v5Key string
 		if strings.HasPrefix(url, "git+") {
-			// Non-registry deps use pnpmPackageKey format with / prefix
 			v5Key = "/" + pnpmPackageKey(pkg)
 		} else {
 			v5Key = buildV5PackageKey(pkg.Node.Name, pkg.Node.Version)
+		}
+		// Patched deps: append _hash suffix to key.
+		if pkg.Node.Patched && pkg.Node.PatchHash != "" {
+			v5Key += "_" + pkg.Node.PatchHash
 		}
 		pkgNode := buildInlinePackageNode(pkg, devFlags[key])
 		addMapping(packagesNode, v5Key, pkgNode)
@@ -875,6 +907,22 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 	addMapping(root, "settings", settings)
 
+	// patchedDependencies: nested {hash, path} objects (pnpm 8 v6 lockfile).
+	if len(result.PatchHashes) > 0 {
+		patchedNode := &yaml.Node{Kind: yaml.MappingNode}
+		for _, key := range maputil.SortedMapKeys(result.PatchHashes) {
+			entryNode := &yaml.Node{Kind: yaml.MappingNode}
+			addMapping(entryNode, "hash", scalarNode(result.PatchHashes[key], 0))
+			if project.PatchedDependencies != nil {
+				if path, ok := project.PatchedDependencies[key]; ok {
+					addMapping(entryNode, "path", scalarNode(path, 0))
+				}
+			}
+			addMapping(patchedNode, key, entryNode)
+		}
+		addMapping(root, "patchedDependencies", patchedNode)
+	}
+
 	// importers (reuse the v9 importer builder, with v6 key format for aliases)
 	importers := &yaml.Node{Kind: yaml.MappingNode}
 	importerDot := buildImporter(project, result, true)
@@ -908,6 +956,10 @@ func (f *PnpmLockV6Formatter) FormatFromResult(result *ResolveResult, project *e
 			pkgKey = "file:" + path
 		} else {
 			pkgKey = buildV6PackageKey(pkg.Node.Name, pkg.Node.Version)
+		}
+		// Patched deps: append _hash suffix to key.
+		if pkg.Node.Patched && pkg.Node.PatchHash != "" {
+			pkgKey += "_" + pkg.Node.PatchHash
 		}
 		pkgNode := buildInlinePackageNode(pkg, devFlags[key])
 		addMapping(packagesNode, pkgKey, pkgNode)
