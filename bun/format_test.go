@@ -822,3 +822,37 @@ func truncate(data []byte, n int) string {
 	}
 	return string(data[:n]) + "..."
 }
+
+func TestBunLockFormatter_AliasedDep(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-positive", "1.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "alias-test",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "positive", Constraint: "npm:is-positive@1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	result := resolveForFormatTest(t, reg, project)
+	f := NewBunLockFormatter()
+
+	data, err := f.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	lockfile := string(data)
+	t.Logf("Generated lockfile:\n%s", lockfile)
+
+	// Bun aliases: the package key should use the alias name "positive".
+	if !strings.Contains(lockfile, `"positive"`) {
+		t.Error("missing alias key 'positive' in packages section")
+	}
+
+	// Should reference is-positive in the resolved URL.
+	if !strings.Contains(lockfile, "is-positive") {
+		t.Error("missing resolved is-positive package reference")
+	}
+}

@@ -834,3 +834,52 @@ func TestBerryDependenciesMetaBuilt_NoBuildScripts(t *testing.T) {
 		t.Errorf("parent-pkg should NOT have dependenciesMeta when no deps have install scripts.\nParent entry:\n%s", parentSection)
 	}
 }
+
+func TestBerry_AliasedDep(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-positive", "1.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "alias-test",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "positive", Constraint: "npm:is-positive@1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	resolver := NewResolver()
+	result, err := resolver.ResolveForLockfile(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	for _, format := range []struct {
+		name      string
+		formatter interface {
+			FormatFromResult(*ResolveResult, *ecosystem.ProjectSpec) ([]byte, error)
+		}
+	}{
+		{"v8", NewYarnBerryV8Formatter()},
+		{"v6", NewYarnBerryV6Formatter()},
+	} {
+		t.Run(format.name, func(t *testing.T) {
+			output, err := format.formatter.FormatFromResult(result, project)
+			if err != nil {
+				t.Fatalf("format failed: %v", err)
+			}
+
+			lockfile := string(output)
+			t.Logf("Generated lockfile:\n%s", lockfile)
+
+			// The constraint descriptor should use the alias name.
+			if !strings.Contains(lockfile, "positive@npm:is-positive@1.0.0") {
+				t.Error("missing alias constraint descriptor: positive@npm:is-positive@1.0.0")
+			}
+
+			// The resolution should reference the real package name.
+			if !strings.Contains(lockfile, "is-positive@npm:1.0.0") {
+				t.Error("missing resolution for is-positive")
+			}
+		})
+	}
+}

@@ -1279,6 +1279,145 @@ func TestResolve_TransitiveOptionalDepFailure(t *testing.T) {
 	_ = graph
 }
 
+// --- Catalog resolution ---
+
+func TestResolve_CatalogDefault(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-number", "7.0.0", baseTime, nil)
+
+	project := &ProjectSpec{
+		Name: "test", Version: "1.0.0",
+		Dependencies: []DeclaredDep{
+			{Name: "is-number", Constraint: "catalog:", Type: DepRegular},
+		},
+		Catalogs: map[string]map[string]string{
+			"default": {"is-number": "^7.0.0"},
+		},
+	}
+
+	graph, err := Resolve(context.Background(), project, reg, ResolveOptions{}, ResolverPolicy{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	edge := graph.Root.Dependencies[0]
+	if edge.Target.Version != "7.0.0" {
+		t.Errorf("expected is-number@7.0.0, got %s", edge.Target.Version)
+	}
+	// Root edge should keep original catalog: constraint.
+	if edge.Constraint != "catalog:" {
+		t.Errorf("edge constraint = %q, want %q", edge.Constraint, "catalog:")
+	}
+}
+
+func TestResolve_CatalogNamed(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("lodash", "3.10.1", baseTime, nil)
+
+	project := &ProjectSpec{
+		Name: "test", Version: "1.0.0",
+		Dependencies: []DeclaredDep{
+			{Name: "lodash", Constraint: "catalog:special", Type: DepRegular},
+		},
+		Catalogs: map[string]map[string]string{
+			"special": {"lodash": "^3.10.0"},
+		},
+	}
+
+	graph, err := Resolve(context.Background(), project, reg, ResolveOptions{}, ResolverPolicy{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	edge := graph.Root.Dependencies[0]
+	if edge.Target.Version != "3.10.1" {
+		t.Errorf("expected lodash@3.10.1, got %s", edge.Target.Version)
+	}
+	if edge.Constraint != "catalog:special" {
+		t.Errorf("edge constraint = %q, want %q", edge.Constraint, "catalog:special")
+	}
+}
+
+func TestResolve_CatalogUnknownName(t *testing.T) {
+	reg := newMockRegistry()
+
+	project := &ProjectSpec{
+		Name: "test", Version: "1.0.0",
+		Dependencies: []DeclaredDep{
+			{Name: "lodash", Constraint: "catalog:nonexistent", Type: DepRegular},
+		},
+		Catalogs: map[string]map[string]string{
+			"default": {"lodash": "^4.0.0"},
+		},
+	}
+
+	_, err := Resolve(context.Background(), project, reg, ResolveOptions{}, ResolverPolicy{})
+	if err == nil {
+		t.Fatal("expected error for unknown catalog name")
+	}
+}
+
+func TestResolve_CatalogPackageNotFound(t *testing.T) {
+	reg := newMockRegistry()
+
+	project := &ProjectSpec{
+		Name: "test", Version: "1.0.0",
+		Dependencies: []DeclaredDep{
+			{Name: "unknown-pkg", Constraint: "catalog:", Type: DepRegular},
+		},
+		Catalogs: map[string]map[string]string{
+			"default": {"lodash": "^4.0.0"},
+		},
+	}
+
+	_, err := Resolve(context.Background(), project, reg, ResolveOptions{}, ResolverPolicy{})
+	if err == nil {
+		t.Fatal("expected error for package not found in catalog")
+	}
+}
+
+func TestResolve_CatalogInWorkspaceMember(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-number", "7.0.0", baseTime, nil)
+
+	project := &ProjectSpec{
+		Name: "test", Version: "1.0.0",
+		Workspaces: []*WorkspaceMember{
+			{
+				RelPath: "packages/lib-a",
+				Spec: &ProjectSpec{
+					Name: "lib-a", Version: "1.0.0",
+					Dependencies: []DeclaredDep{
+						{Name: "is-number", Constraint: "catalog:", Type: DepRegular},
+					},
+				},
+			},
+		},
+		Catalogs: map[string]map[string]string{
+			"default": {"is-number": "^7.0.0"},
+		},
+	}
+
+	graph, err := Resolve(context.Background(), project, reg, ResolveOptions{}, ResolverPolicy{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Root should have workspace edge for lib-a.
+	wsEdge := graph.Root.Dependencies[0]
+	if wsEdge.Target.Name != "lib-a" {
+		t.Fatalf("expected workspace member lib-a, got %s", wsEdge.Target.Name)
+	}
+	// lib-a should have resolved is-number via catalog.
+	if len(wsEdge.Target.Dependencies) != 1 {
+		t.Fatalf("expected 1 dep on lib-a, got %d", len(wsEdge.Target.Dependencies))
+	}
+	isNumEdge := wsEdge.Target.Dependencies[0]
+	if isNumEdge.Target.Version != "7.0.0" {
+		t.Errorf("expected is-number@7.0.0, got %s", isNumEdge.Target.Version)
+	}
+}
+
 // --- No satisfying version ---
 
 func TestResolve_NoSatisfyingVersion(t *testing.T) {
@@ -1293,5 +1432,70 @@ func TestResolve_NoSatisfyingVersion(t *testing.T) {
 	_, err := Resolve(context.Background(), project, reg, ResolveOptions{}, ResolverPolicy{})
 	if err == nil {
 		t.Fatal("expected error for no satisfying version")
+	}
+}
+
+// --- PatchedDependencies ---
+
+func TestResolve_PatchedDependencies(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-number", "7.0.0", baseTime, nil)
+	reg.addVersion("is-odd", "3.0.1", baseTime, map[string]string{"is-number": "^7.0.0"})
+
+	project := &ProjectSpec{
+		Name: "test", Version: "1.0.0",
+		Dependencies: []DeclaredDep{
+			{Name: "is-odd", Constraint: "3.0.1", Type: DepRegular},
+		},
+		PatchedDependencies: map[string]string{
+			"is-odd@3.0.1": "patches/is-odd@3.0.1.patch",
+		},
+	}
+
+	policy := ResolverPolicy{CrossTreeDedup: true, AutoInstallPeers: true}
+	graph, err := Resolve(context.Background(), project, reg, ResolveOptions{}, policy)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// is-odd@3.0.1 should have Patched=true.
+	isOddNode := graph.Root.Dependencies[0].Target
+	if isOddNode.Name != "is-odd" {
+		t.Fatalf("expected is-odd, got %s", isOddNode.Name)
+	}
+	if !isOddNode.Patched {
+		t.Error("is-odd@3.0.1 should have Patched=true")
+	}
+
+	// is-number@7.0.0 should NOT have Patched=true.
+	isNumberNode := isOddNode.Dependencies[0].Target
+	if isNumberNode.Name != "is-number" {
+		t.Fatalf("expected is-number, got %s", isNumberNode.Name)
+	}
+	if isNumberNode.Patched {
+		t.Error("is-number@7.0.0 should NOT have Patched=true")
+	}
+}
+
+func TestResolve_PatchedDependencies_Nil(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("A", "1.0.0", baseTime, nil)
+
+	project := &ProjectSpec{
+		Name: "test", Version: "1.0.0",
+		Dependencies: []DeclaredDep{
+			{Name: "A", Constraint: "^1.0.0", Type: DepRegular},
+		},
+		// PatchedDependencies is nil.
+	}
+
+	graph, err := Resolve(context.Background(), project, reg, ResolveOptions{}, ResolverPolicy{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	aNode := graph.Root.Dependencies[0].Target
+	if aNode.Patched {
+		t.Error("A should NOT have Patched=true when no PatchedDependencies")
 	}
 }

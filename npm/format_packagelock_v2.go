@@ -29,7 +29,7 @@ func (f *PackageLockV2Formatter) FormatFromResult(result *ResolveResult, project
 	packages := make(map[string]orderedjson.Map, len(result.PlacedNodes)+1)
 	packages[""] = buildRootEntry(project)
 	for path, placed := range result.PlacedNodes {
-		packages[path] = buildPackageEntry(placed.Node)
+		packages[path] = buildPackageEntry(placed.Node, placedDepName(path))
 		// file: deps also need a top-level directory entry with their version.
 		if strings.HasPrefix(placed.Node.TarballURL, "file:") {
 			dirName := strings.TrimPrefix(placed.Node.TarballURL, "file:")

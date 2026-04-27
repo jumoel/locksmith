@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,21 +15,32 @@ import (
 
 // RegistryClient fetches package metadata from the npm registry.
 type RegistryClient struct {
-	baseURL    string
-	httpClient *http.Client
-	mu         sync.Mutex
-	cache      map[string]*Packument
+	baseURL         string
+	httpClient      *http.Client
+	mu              sync.Mutex
+	cache           map[string]*Packument
+	scopeRegistries map[string]string // "@scope" -> registry URL
+	authTokens      map[string]string // registry URL -> bearer token
 }
 
-// NewRegistryClient creates a new npm registry client.
+// NewRegistryClient creates a new npm registry client with no scope routing or auth.
 func NewRegistryClient(baseURL string) *RegistryClient {
+	return NewRegistryClientWithConfig(baseURL, nil, nil)
+}
+
+// NewRegistryClientWithConfig creates a registry client with per-scope routing and auth tokens.
+// scopeRegistries maps npm scopes (e.g., "@company") to registry URLs.
+// authTokens maps registry base URLs to Bearer tokens.
+func NewRegistryClientWithConfig(baseURL string, scopeRegistries, authTokens map[string]string) *RegistryClient {
 	if baseURL == "" {
 		baseURL = "https://registry.npmjs.org"
 	}
 	return &RegistryClient{
-		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		cache:      make(map[string]*Packument),
+		baseURL:         baseURL,
+		httpClient:      &http.Client{Timeout: 30 * time.Second},
+		cache:           make(map[string]*Packument),
+		scopeRegistries: scopeRegistries,
+		authTokens:      authTokens,
 	}
 }
 
@@ -67,6 +79,20 @@ func retryBackoff(attempt int) time.Duration {
 	return time.Duration(1<<uint(attempt-1)) * 200 * time.Millisecond
 }
 
+// registryForPackage returns the registry URL for a given package name.
+// Scoped packages (@scope/name) use scope-specific registries if configured.
+func (r *RegistryClient) registryForPackage(name string) string {
+	if r.scopeRegistries != nil && strings.HasPrefix(name, "@") {
+		if idx := strings.Index(name, "/"); idx > 0 {
+			scope := name[:idx]
+			if url, ok := r.scopeRegistries[scope]; ok {
+				return url
+			}
+		}
+	}
+	return r.baseURL
+}
+
 // fetchPackument fetches and caches the full packument for a package.
 func (r *RegistryClient) fetchPackument(ctx context.Context, name string) (*Packument, error) {
 	r.mu.Lock()
@@ -76,12 +102,18 @@ func (r *RegistryClient) fetchPackument(ctx context.Context, name string) (*Pack
 	}
 	r.mu.Unlock()
 
-	url := fmt.Sprintf("%s/%s", r.baseURL, name)
+	registryURL := r.registryForPackage(name)
+	url := fmt.Sprintf("%s/%s", registryURL, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request for %s: %w", name, err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if r.authTokens != nil {
+		if token, ok := r.authTokens[registryURL]; ok {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
 
 	resp, err := r.doWithRetry(req)
 	if err != nil {

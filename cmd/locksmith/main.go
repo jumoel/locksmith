@@ -33,13 +33,15 @@ func rootCmd() *cobra.Command {
 
 func generateCmd() *cobra.Command {
 	var (
-		specPath    string
-		format      string
-		cutoffStr   string
-		registryURL string
-		outputPath  string
-		platform    string
-		nodeVersion string
+		specPath        string
+		format          string
+		cutoffStr       string
+		registryURL     string
+		outputPath      string
+		platform        string
+		nodeVersion     string
+		scopeRegistries []string
+		authTokens      []string
 	)
 
 	cmd := &cobra.Command{
@@ -64,15 +66,36 @@ func generateCmd() *cobra.Command {
 				return fmt.Errorf("discovering workspace members: %w", err)
 			}
 
+			// Auto-discover pnpm catalogs from pnpm-workspace.yaml.
+			catalogs, err := discoverPnpmCatalogs(specPath)
+			if err != nil {
+				return fmt.Errorf("discovering pnpm catalogs: %w", err)
+			}
+
+			// Parse scope registries.
+			scopeRegs, err := parseKeyValuePairs(scopeRegistries, "scope-registry")
+			if err != nil {
+				return err
+			}
+
+			// Parse auth tokens.
+			authToks, err := parseKeyValuePairs(authTokens, "auth-token")
+			if err != nil {
+				return err
+			}
+
 			// Parse cutoff date
 			opts := locksmith.GenerateOptions{
 				SpecFile:         specData,
 				OutputFormat:     outputFormat,
 				RegistryURL:      registryURL,
+				ScopeRegistries:  scopeRegs,
+				AuthTokens:       authToks,
 				Platform:         platform,
 				SpecDir:          filepath.Dir(specPath),
 				WorkspaceMembers: members,
 				NodeVersion:      nodeVersion,
+				Catalogs:         catalogs,
 			}
 			if cutoffStr != "" {
 				t, err := time.Parse(time.RFC3339, cutoffStr)
@@ -109,6 +132,8 @@ func generateCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "output file path (default: stdout)")
 	cmd.Flags().StringVarP(&platform, "platform", "p", "", "target platform os/cpu (e.g., linux/x64) to filter incompatible optional deps")
 	cmd.Flags().StringVar(&nodeVersion, "node-version", "", "target Node.js version for engines.node filtering (e.g., 18.0.0)")
+	cmd.Flags().StringArrayVar(&scopeRegistries, "scope-registry", nil, "scope=url pairs for per-scope registry routing (e.g., @company=https://private.registry.com)")
+	cmd.Flags().StringArrayVar(&authTokens, "auth-token", nil, "url=token pairs for per-registry Bearer auth (e.g., https://private.registry.com=secrettoken)")
 
 	_ = cmd.MarkFlagRequired("spec")
 	_ = cmd.MarkFlagRequired("format")
@@ -142,4 +167,26 @@ func validFormatsStr() string {
 		strs[i] = string(f)
 	}
 	return strings.Join(strs, ", ")
+}
+
+// parseKeyValuePairs parses "key=value" strings into a map.
+// Returns nil (not empty map) when the input slice is empty.
+func parseKeyValuePairs(pairs []string, flagName string) (map[string]string, error) {
+	if len(pairs) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]string, len(pairs))
+	for _, pair := range pairs {
+		idx := strings.Index(pair, "=")
+		if idx <= 0 {
+			return nil, fmt.Errorf("--%s value %q must be in key=value format", flagName, pair)
+		}
+		key := pair[:idx]
+		value := pair[idx+1:]
+		if value == "" {
+			return nil, fmt.Errorf("--%s value %q has empty value", flagName, pair)
+		}
+		result[key] = value
+	}
+	return result, nil
 }

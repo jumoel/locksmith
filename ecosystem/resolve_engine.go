@@ -104,8 +104,10 @@ type resolverState struct {
 	overrides         *OverrideSet         // version overrides from package.json
 	packageExtensions *PackageExtensionSet // pnpm packageExtensions
 	peerDepRules      *PeerDependencyRules // pnpm peerDependencyRules
-	ancestry          []string             // current resolution chain for override matching
-	nodeVersion       *semver.Version      // target Node.js version for engines filtering
+	catalogs          map[string]map[string]string // pnpm catalogs
+	patchedDeps       map[string]string            // pnpm patchedDependencies
+	ancestry          []string                     // current resolution chain for override matching
+	nodeVersion       *semver.Version              // target Node.js version for engines filtering
 }
 
 // Resolve executes the shared dependency resolution algorithm.
@@ -134,6 +136,8 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 		overrides:         project.Overrides,
 		packageExtensions: project.PackageExtensions,
 		peerDepRules:      project.PeerDependencyRules,
+		catalogs:          project.Catalogs,
+		patchedDeps:       project.PatchedDependencies,
 		nodeVersion:       nodeVer,
 	}
 
@@ -217,6 +221,23 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		if overrideVersion, ok := s.overrides.FindOverride(actualName, s.ancestry); ok {
 			actualConstraint = overrideVersion
 		}
+	}
+
+	// Handle catalog: protocol - replace with looked-up constraint from pnpm catalogs.
+	if s.catalogs != nil && strings.HasPrefix(actualConstraint, "catalog:") {
+		catalogName := strings.TrimPrefix(actualConstraint, "catalog:")
+		if catalogName == "" {
+			catalogName = "default"
+		}
+		catalog, ok := s.catalogs[catalogName]
+		if !ok {
+			return nil, "", fmt.Errorf("catalog %q not found", catalogName)
+		}
+		resolved, ok := catalog[actualName]
+		if !ok {
+			return nil, "", fmt.Errorf("package %q not found in catalog %q", actualName, catalogName)
+		}
+		actualConstraint = resolved
 	}
 
 	// Handle workspace: protocol - resolve to a local workspace member.
@@ -471,6 +492,13 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 	}
 	if depType == DepOptional {
 		node.Optional = true
+	}
+
+	if s.patchedDeps != nil {
+		patchKey := node.Name + "@" + node.Version
+		if _, ok := s.patchedDeps[patchKey]; ok {
+			node.Patched = true
+		}
 	}
 
 	s.nodes[key] = node

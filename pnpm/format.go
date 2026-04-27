@@ -390,6 +390,10 @@ func buildPackages(result *ResolveResult, wsNames map[string]bool) *yaml.Node {
 			addMapping(pkgNode, "resolution", resolution)
 		}
 
+		if pkg.Node.Patched {
+			addMapping(pkgNode, "patched", scalarNode("true", 0))
+		}
+
 		displayKey := pnpmPackageKey(pkg)
 
 		if len(pkg.Node.Engines) > 0 {
@@ -593,6 +597,10 @@ func buildInlinePackageNode(pkg *ResolvedPackage, isDev bool) *yaml.Node {
 		resNode := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
 		addMapping(resNode, "integrity", scalarNode(pkg.Node.Integrity, 0))
 		addMapping(pkgNode, "resolution", resNode)
+	}
+
+	if pkg.Node.Patched {
+		addMapping(pkgNode, "patched", scalarNode("true", 0))
 	}
 
 	// engines: {node: '>=4'}

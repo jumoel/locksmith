@@ -266,6 +266,117 @@ func TestGenerateCmd_NodeVersionFlag(t *testing.T) {
 	}
 }
 
+func TestParseKeyValuePairs(t *testing.T) {
+	tests := []struct {
+		name    string
+		pairs   []string
+		flag    string
+		want    map[string]string
+		wantErr bool
+	}{
+		{
+			name:  "nil input returns nil",
+			pairs: nil,
+			flag:  "test",
+			want:  nil,
+		},
+		{
+			name:  "empty input returns nil",
+			pairs: []string{},
+			flag:  "test",
+			want:  nil,
+		},
+		{
+			name:  "single pair",
+			pairs: []string{"@company=https://private.registry.com"},
+			flag:  "scope-registry",
+			want:  map[string]string{"@company": "https://private.registry.com"},
+		},
+		{
+			name:  "multiple pairs",
+			pairs: []string{"@a=https://a.com", "@b=https://b.com"},
+			flag:  "scope-registry",
+			want:  map[string]string{"@a": "https://a.com", "@b": "https://b.com"},
+		},
+		{
+			name:  "value with equals sign",
+			pairs: []string{"https://registry.com=token=with=equals"},
+			flag:  "auth-token",
+			want:  map[string]string{"https://registry.com": "token=with=equals"},
+		},
+		{
+			name:    "missing equals sign",
+			pairs:   []string{"invalid"},
+			flag:    "test",
+			wantErr: true,
+		},
+		{
+			name:    "empty value",
+			pairs:   []string{"key="},
+			flag:    "test",
+			wantErr: true,
+		},
+		{
+			name:    "empty key (starts with =)",
+			pairs:   []string{"=value"},
+			flag:    "test",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseKeyValuePairs(tt.pairs, tt.flag)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d pairs, want %d", len(got), len(tt.want))
+			}
+			for k, wantV := range tt.want {
+				if gotV, ok := got[k]; !ok || gotV != wantV {
+					t.Errorf("got[%q] = %q, want %q", k, gotV, wantV)
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateCmd_ScopeRegistryFlag(t *testing.T) {
+	cmd := generateCmd()
+	// Verify the flags exist and can be set.
+	flag := cmd.Flags().Lookup("scope-registry")
+	if flag == nil {
+		t.Fatal("--scope-registry flag not found")
+	}
+	if flag.DefValue != "[]" {
+		t.Errorf("--scope-registry default = %q, want %q", flag.DefValue, "[]")
+	}
+}
+
+func TestGenerateCmd_AuthTokenFlag(t *testing.T) {
+	cmd := generateCmd()
+	flag := cmd.Flags().Lookup("auth-token")
+	if flag == nil {
+		t.Fatal("--auth-token flag not found")
+	}
+	if flag.DefValue != "[]" {
+		t.Errorf("--auth-token default = %q, want %q", flag.DefValue, "[]")
+	}
+}
+
 func TestGenerateCmd_PnpmWorkspaceYaml(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping pnpm workspace yaml test in short mode (needs real registry)")

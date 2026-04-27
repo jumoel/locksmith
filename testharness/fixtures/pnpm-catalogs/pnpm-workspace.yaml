@@ -1,0 +1,4 @@
+packages:
+  - packages/*
+catalog:
+  is-number: ^7.0.0

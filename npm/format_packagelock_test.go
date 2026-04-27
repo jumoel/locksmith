@@ -250,3 +250,97 @@ func TestPackageLockV3_NestedDeps(t *testing.T) {
 
 	t.Logf("Output:\n%s", data)
 }
+
+func TestPackageLockV3_AliasedDep(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-positive", "1.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "alias-test",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "positive", Constraint: "npm:is-positive@1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	r := NewResolver()
+	result, err := r.ResolveWithPlacement(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	formatter := NewPackageLockV3Formatter()
+	data, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, data)
+	}
+
+	packages := raw["packages"].(map[string]interface{})
+
+	// The package should be placed under the alias name.
+	aliasEntry, ok := packages["node_modules/positive"].(map[string]interface{})
+	if !ok {
+		t.Fatal("node_modules/positive not found - alias name not preserved in placement")
+	}
+
+	// v3 aliases must include a "name" field with the real package name.
+	if aliasEntry["name"] != "is-positive" {
+		t.Errorf("alias entry name = %v, want is-positive", aliasEntry["name"])
+	}
+	if aliasEntry["version"] != "1.0.0" {
+		t.Errorf("alias entry version = %v, want 1.0.0", aliasEntry["version"])
+	}
+
+	t.Logf("Output:\n%s", data)
+}
+
+func TestPackageLockV1_AliasedDep(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-positive", "1.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "alias-test",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "positive", Constraint: "npm:is-positive@1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	r := NewResolver()
+	result, err := r.ResolveWithPlacement(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	formatter := NewPackageLockV1Formatter()
+	data, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, data)
+	}
+
+	deps := raw["dependencies"].(map[string]interface{})
+
+	// The dependency should be keyed by alias name.
+	aliasEntry, ok := deps["positive"].(map[string]interface{})
+	if !ok {
+		t.Fatal("positive not found in dependencies - alias name not preserved")
+	}
+
+	// v1 aliases use "npm:real-name@version" as the version string.
+	expectedVersion := "npm:is-positive@1.0.0"
+	if aliasEntry["version"] != expectedVersion {
+		t.Errorf("alias entry version = %v, want %v", aliasEntry["version"], expectedVersion)
+	}
+
+	t.Logf("Output:\n%s", data)
+}

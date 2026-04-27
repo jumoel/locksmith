@@ -488,3 +488,42 @@ func TestYarnClassic_TransitiveDeps(t *testing.T) {
 		t.Error("missing C version 1.3.0")
 	}
 }
+
+func TestYarnClassic_AliasedDep(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-positive", "1.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "alias-test",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "positive", Constraint: "npm:is-positive@1.0.0", Type: ecosystem.DepRegular},
+		},
+	}
+
+	resolver := NewResolver()
+	result, err := resolver.ResolveForLockfile(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	formatter := NewYarnClassicFormatter()
+	output, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	lockfile := string(output)
+	t.Logf("Generated lockfile:\n%s", lockfile)
+
+	// Yarn classic aliases use the alias name in the constraint header.
+	// Format: "positive@npm:is-positive@1.0.0":
+	if !strings.Contains(lockfile, `"positive@npm:is-positive@1.0.0":`) {
+		t.Error("missing alias constraint key: positive@npm:is-positive@1.0.0")
+	}
+
+	// The version should be the real package version.
+	if !strings.Contains(lockfile, `version "1.0.0"`) {
+		t.Error("missing version 1.0.0")
+	}
+}

@@ -468,6 +468,56 @@ func TestSpecParser_ParseFull_DeprecatedBunOverrides(t *testing.T) {
 	}
 }
 
+func TestSpecParser_ParseFull_PnpmPatchedDependencies(t *testing.T) {
+	data := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {"is-odd": "3.0.1"},
+		"pnpm": {
+			"patchedDependencies": {
+				"is-odd@3.0.1": "patches/is-odd@3.0.1.patch"
+			}
+		}
+	}`)
+
+	p := NewSpecParser()
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	if result.PnpmPatchedDependencies == nil {
+		t.Fatal("PnpmPatchedDependencies is nil, expected non-nil")
+	}
+
+	// Verify the raw JSON round-trips correctly.
+	m, err := ParsePatchedDependencies(result.PnpmPatchedDependencies)
+	if err != nil {
+		t.Fatalf("parsing PnpmPatchedDependencies: %v", err)
+	}
+	if m["is-odd@3.0.1"] != "patches/is-odd@3.0.1.patch" {
+		t.Errorf("unexpected value: %q", m["is-odd@3.0.1"])
+	}
+}
+
+func TestSpecParser_ParseFull_NoPnpmPatchedDependencies(t *testing.T) {
+	data := []byte(`{
+		"name": "test",
+		"version": "1.0.0",
+		"dependencies": {"is-odd": "3.0.1"}
+	}`)
+
+	p := NewSpecParser()
+	result, err := p.ParseFull(data)
+	if err != nil {
+		t.Fatalf("ParseFull() error: %v", err)
+	}
+
+	if result.PnpmPatchedDependencies != nil {
+		t.Errorf("PnpmPatchedDependencies should be nil, got %s", string(result.PnpmPatchedDependencies))
+	}
+}
+
 func TestSpecParser_Parse_DependenciesSorted(t *testing.T) {
 	// Deliberately unsorted input to verify sort behavior.
 	data := []byte(`{

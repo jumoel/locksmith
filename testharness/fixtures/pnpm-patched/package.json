@@ -1,0 +1,12 @@
+{
+  "name": "locksmith-test-pnpm-patched",
+  "version": "1.0.0",
+  "dependencies": {
+    "is-odd": "3.0.1"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "is-odd@3.0.1": "patches/is-odd@3.0.1.patch"
+    }
+  }
+}

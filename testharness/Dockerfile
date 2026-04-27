@@ -35,6 +35,7 @@ RUN npm install -g pnpm@7 --prefix /opt/pnpm7
 RUN npm install -g pnpm@8 --prefix /opt/pnpm8
 RUN npm install -g pnpm@9 --prefix /opt/pnpm9
 RUN npm install -g pnpm@10 --prefix /opt/pnpm10
+RUN npm install -g pnpm@11 --prefix /opt/pnpm11
 
 # Install yarn classic (v1).
 RUN npm install -g yarn@1 --prefix /opt/yarn1
@@ -52,11 +53,13 @@ RUN npm install -g pnpm@4 --prefix /opt/pnpm4
 # pnpm@6 crashes on Node 22 - use @pnpm/exe which bundles its own Node.
 RUN npm install -g @pnpm/exe@6 --prefix /opt/pnpm6
 
-# Install bun, git, and openssh-client.
+# Install git and openssh-client.
 RUN apt-get update && apt-get install -y curl unzip git openssh-client && \
-    curl -fsSL https://bun.sh/install | bash && \
-    ln -s /root/.bun/bin/bun /usr/local/bin/bun && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install pinned bun versions (bun install script supports BUN_INSTALL for prefix).
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun12 bash -s "bun-v1.2.23"
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun13 bash -s "bun-v1.3.13"
 
 # Pre-accept GitHub's SSH host key so git+ssh deps work without prompts.
 RUN mkdir -p /root/.ssh && \
@@ -74,6 +77,7 @@ ENV GIT_TERMINAL_PROMPT=0
 COPY run-npm.sh /usr/local/bin/run-npm
 COPY run-pnpm.sh /usr/local/bin/run-pnpm
 COPY run-yarn.sh /usr/local/bin/run-yarn
-RUN chmod +x /usr/local/bin/run-npm /usr/local/bin/run-pnpm /usr/local/bin/run-yarn
+COPY run-bun.sh /usr/local/bin/run-bun
+RUN chmod +x /usr/local/bin/run-npm /usr/local/bin/run-pnpm /usr/local/bin/run-yarn /usr/local/bin/run-bun
 
 WORKDIR /workspace

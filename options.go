@@ -67,6 +67,16 @@ type GenerateOptions struct {
 	// RegistryURL overrides the default registry for the ecosystem.
 	RegistryURL string
 
+	// ScopeRegistries maps npm scopes to registry URLs.
+	// Key is the scope with @ prefix (e.g., "@company"), value is the registry base URL.
+	// Packages matching a scope use the scope-specific registry instead of RegistryURL.
+	ScopeRegistries map[string]string
+
+	// AuthTokens maps registry base URLs to Bearer tokens.
+	// Key must match the registry URL exactly (including trailing slash if present).
+	// The token is sent as an Authorization: Bearer header.
+	AuthTokens map[string]string
+
 	// PolicyOverride, if set, overrides the default ResolverPolicy for the
 	// chosen format. Use this to match the behavior of a specific package
 	// manager version (e.g., npm 5-6 which don't auto-install peers).
@@ -91,4 +101,9 @@ type GenerateOptions struct {
 	// Format: semver string (e.g., "18.0.0"). When all candidate versions
 	// are incompatible, the best version is used regardless (matches npm behavior).
 	NodeVersion string
+
+	// Catalogs provides pnpm catalog definitions. Maps catalog name ("default"
+	// for the unnamed catalog:) to package name -> version constraint.
+	// Typically parsed from pnpm-workspace.yaml by the CLI.
+	Catalogs map[string]map[string]string
 }

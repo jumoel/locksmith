@@ -1,0 +1,7 @@
+{
+  "name": "locksmith-test-pnpm-catalogs",
+  "version": "1.0.0",
+  "dependencies": {
+    "is-number": "catalog:"
+  }
+}

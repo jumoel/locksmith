@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jumoel/locksmith/ecosystem"
@@ -264,6 +265,69 @@ func TestGenerate_RealRegistry(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Generate - mock server
 // ---------------------------------------------------------------------------
+
+func TestGenerate_PnpmCatalogs(t *testing.T) {
+	isNumberData := []byte(`{
+  "_id": "is-number",
+  "name": "is-number",
+  "dist-tags": { "latest": "7.0.0" },
+  "time": {
+    "created": "2015-01-01T00:00:00.000Z",
+    "modified": "2018-01-01T00:00:00.000Z",
+    "7.0.0": "2018-01-01T00:00:00.000Z"
+  },
+  "versions": {
+    "7.0.0": {
+      "name": "is-number",
+      "version": "7.0.0",
+      "license": "MIT",
+      "dependencies": {},
+      "dist": {
+        "integrity": "sha512-MockIntegrity7000000000000000000000000000000000000000000000000==",
+        "shasum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "tarball": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz"
+      }
+    }
+  }
+}`)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/is-number", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(isNumberData)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// package.json uses catalog: protocol for is-number.
+	spec := []byte(`{"name":"test","version":"1.0.0","dependencies":{"is-number":"catalog:"}}`)
+
+	result, err := Generate(context.Background(), GenerateOptions{
+		SpecFile:     spec,
+		OutputFormat: FormatPnpmLockV9,
+		RegistryURL:  srv.URL,
+		Catalogs: map[string]map[string]string{
+			"default": {"is-number": "^7.0.0"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate with catalogs error: %v", err)
+	}
+	if len(result.Lockfile) == 0 {
+		t.Fatal("generated empty lockfile")
+	}
+
+	lockfileStr := string(result.Lockfile)
+	// The lockfile should contain the resolved is-number package.
+	if !strings.Contains(lockfileStr, "is-number") {
+		t.Error("lockfile should contain is-number")
+	}
+	// The lockfile should contain the catalog: specifier in the importers section.
+	if !strings.Contains(lockfileStr, "catalog:") {
+		t.Error("lockfile should preserve catalog: specifier in importers section")
+	}
+}
 
 func TestGenerate_MockServer(t *testing.T) {
 	// Load the real is-odd packument fixture.

@@ -96,7 +96,7 @@ type npmFormatter interface {
 
 func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
-	registry := npm.NewRegistryClient(opts.RegistryURL)
+	registry := npm.NewRegistryClientWithConfig(opts.RegistryURL, opts.ScopeRegistries, opts.AuthTokens)
 	resolver := npm.NewResolver()
 	resolver.PolicyOverride = opts.PolicyOverride
 
@@ -201,7 +201,7 @@ type pnpmFormatter interface {
 
 func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
-	registry := npm.NewRegistryClient(opts.RegistryURL)
+	registry := npm.NewRegistryClientWithConfig(opts.RegistryURL, opts.ScopeRegistries, opts.AuthTokens)
 	resolver := pnpm.NewResolver()
 	resolver.PolicyOverride = opts.PolicyOverride
 
@@ -260,6 +260,20 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		spec.PeerDependencyRules = rules
 	}
 
+	// Parse pnpm patchedDependencies and attach to spec.
+	if parseResult.PnpmPatchedDependencies != nil {
+		patchedDeps, err := npm.ParsePatchedDependencies(parseResult.PnpmPatchedDependencies)
+		if err != nil {
+			return nil, fmt.Errorf("parsing pnpm patchedDependencies: %w", err)
+		}
+		spec.PatchedDependencies = patchedDeps
+	}
+
+	// Attach pnpm catalogs if provided.
+	if opts.Catalogs != nil {
+		spec.Catalogs = opts.Catalogs
+	}
+
 	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
@@ -301,7 +315,7 @@ type yarnFormatter interface {
 
 func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
-	registry := npm.NewRegistryClient(opts.RegistryURL)
+	registry := npm.NewRegistryClientWithConfig(opts.RegistryURL, opts.ScopeRegistries, opts.AuthTokens)
 
 	var resolver *yarn.Resolver
 	var formatter yarnFormatter
@@ -399,7 +413,7 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 
 func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
-	registry := npm.NewRegistryClient(opts.RegistryURL)
+	registry := npm.NewRegistryClientWithConfig(opts.RegistryURL, opts.ScopeRegistries, opts.AuthTokens)
 	resolver := bun.NewResolver()
 	formatter := bun.NewBunLockFormatter()
 

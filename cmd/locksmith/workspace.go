@@ -62,3 +62,38 @@ func parsePnpmWorkspaceYaml(data []byte) ([]string, error) {
 	}
 	return config.Packages, nil
 }
+
+// parsePnpmCatalogs extracts catalog definitions from pnpm-workspace.yaml.
+// It merges the unnamed `catalog:` section as "default" into the `catalogs:` map.
+func parsePnpmCatalogs(data []byte) (map[string]map[string]string, error) {
+	var config struct {
+		Catalog  map[string]string            `yaml:"catalog"`
+		Catalogs map[string]map[string]string `yaml:"catalogs"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	result := config.Catalogs
+	if result == nil {
+		result = make(map[string]map[string]string)
+	}
+	if config.Catalog != nil {
+		result["default"] = config.Catalog
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
+// discoverPnpmCatalogs reads pnpm catalog definitions from pnpm-workspace.yaml
+// next to the given spec file. Returns nil if no catalogs are defined.
+func discoverPnpmCatalogs(specPath string) (map[string]map[string]string, error) {
+	specDir := filepath.Dir(specPath)
+	pnpmPath := filepath.Join(specDir, "pnpm-workspace.yaml")
+	data, err := os.ReadFile(pnpmPath)
+	if err != nil {
+		return nil, nil
+	}
+	return parsePnpmCatalogs(data)
+}

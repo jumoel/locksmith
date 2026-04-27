@@ -39,7 +39,7 @@ func (f *PackageLockV3Formatter) FormatFromResult(result *ResolveResult, project
 
 	// All placed packages.
 	for path, placed := range result.PlacedNodes {
-		packages[path] = buildPackageEntry(placed.Node)
+		packages[path] = buildPackageEntry(placed.Node, placedDepName(path))
 		// Workspace members need a directory entry with their full spec.
 		if placed.Node.WorkspacePath != "" {
 			wsEntry := orderedjson.Map{
@@ -147,12 +147,26 @@ func buildRootEntry(project *ecosystem.ProjectSpec) orderedjson.Map {
 	return entry
 }
 
+// placedDepName extracts the dependency name from a node_modules path.
+// "node_modules/foo" -> "foo", "node_modules/a/node_modules/b" -> "b",
+// "node_modules/@scope/pkg" -> "@scope/pkg".
+func placedDepName(path string) string {
+	const prefix = "node_modules/"
+	idx := strings.LastIndex(path, prefix)
+	if idx < 0 {
+		return path
+	}
+	return path[idx+len(prefix):]
+}
+
 // buildPackageEntry constructs a non-root package entry from a resolved node.
+// placedName is the dependency name from the node_modules path - when it
+// differs from node.Name, this is an npm alias and we include a "name" field.
 // Field order matches npm's Arborist output:
 // version, resolved, integrity, dev, optional, hasInstallScript, license,
 // dependencies, optionalDependencies, peerDependencies, peerDependenciesMeta,
 // bin, engines, os, cpu, funding, deprecated.
-func buildPackageEntry(node *ecosystem.Node) orderedjson.Map {
+func buildPackageEntry(node *ecosystem.Node, placedName string) orderedjson.Map {
 	// Workspace members are symlinks - emit link format.
 	if node.WorkspacePath != "" {
 		return orderedjson.Map{
@@ -171,11 +185,19 @@ func buildPackageEntry(node *ecosystem.Node) orderedjson.Map {
 		}
 	}
 
-	entry := orderedjson.Map{
-		{Key: "version", Value: node.Version},
-		{Key: "resolved", Value: node.TarballURL},
-		{Key: "integrity", Value: node.Integrity},
+	entry := orderedjson.Map{}
+
+	// npm aliases: when the placed name differs from the real package name,
+	// include a "name" field so npm can identify the real package.
+	if placedName != "" && placedName != node.Name {
+		entry = append(entry, orderedjson.Entry{Key: "name", Value: node.Name})
 	}
+
+	entry = append(entry,
+		orderedjson.Entry{Key: "version", Value: node.Version},
+		orderedjson.Entry{Key: "resolved", Value: node.TarballURL},
+		orderedjson.Entry{Key: "integrity", Value: node.Integrity},
+	)
 
 	if node.DevOnly {
 		entry = append(entry, orderedjson.Entry{Key: "dev", Value: true})

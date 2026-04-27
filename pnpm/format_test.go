@@ -581,3 +581,117 @@ func TestPnpmLockV5_TransitiveDeps(t *testing.T) {
 
 	t.Logf("Generated V5 YAML:\n%s", yaml)
 }
+
+func TestPnpmLockV9_PatchedDependency(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-odd", "3.0.1", baseTime, map[string]string{"is-number": "^7.0.0"})
+	reg.addVersion("is-number", "7.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "is-odd", Constraint: "3.0.1", Type: ecosystem.DepRegular},
+		},
+		PatchedDependencies: map[string]string{
+			"is-odd@3.0.1": "patches/is-odd@3.0.1.patch",
+		},
+	}
+
+	resolver := NewResolver()
+	result, err := resolver.ResolveForLockfile(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	formatter := NewPnpmLockV9Formatter()
+	output, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	yaml := string(output)
+
+	// The packages section for is-odd@3.0.1 should contain "patched: true".
+	if !strings.Contains(yaml, "patched: true") {
+		t.Error("expected 'patched: true' in output for is-odd@3.0.1")
+	}
+
+	t.Logf("Generated YAML:\n%s", yaml)
+}
+
+func TestPnpmLockV5_PatchedDependency(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-odd", "3.0.1", baseTime, map[string]string{"is-number": "^7.0.0"})
+	reg.addVersion("is-number", "7.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "is-odd", Constraint: "3.0.1", Type: ecosystem.DepRegular},
+		},
+		PatchedDependencies: map[string]string{
+			"is-odd@3.0.1": "patches/is-odd@3.0.1.patch",
+		},
+	}
+
+	resolver := NewResolver()
+	result, err := resolver.ResolveForLockfile(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	formatter := NewPnpmLockV5Formatter()
+	output, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	yaml := string(output)
+
+	// The packages section for is-odd should contain "patched: true".
+	if !strings.Contains(yaml, "patched: true") {
+		t.Error("expected 'patched: true' in v5 output for is-odd@3.0.1")
+	}
+
+	t.Logf("Generated V5 YAML:\n%s", yaml)
+}
+
+func TestPnpmLockV6_PatchedDependency(t *testing.T) {
+	reg := newMockRegistry()
+	reg.addVersion("is-odd", "3.0.1", baseTime, map[string]string{"is-number": "^7.0.0"})
+	reg.addVersion("is-number", "7.0.0", baseTime, nil)
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "is-odd", Constraint: "3.0.1", Type: ecosystem.DepRegular},
+		},
+		PatchedDependencies: map[string]string{
+			"is-odd@3.0.1": "patches/is-odd@3.0.1.patch",
+		},
+	}
+
+	resolver := NewResolver()
+	result, err := resolver.ResolveForLockfile(context.Background(), project, reg, ecosystem.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	formatter := NewPnpmLockV6Formatter()
+	output, err := formatter.FormatFromResult(result, project)
+	if err != nil {
+		t.Fatalf("format failed: %v", err)
+	}
+
+	yaml := string(output)
+
+	// The packages section for is-odd should contain "patched: true".
+	if !strings.Contains(yaml, "patched: true") {
+		t.Error("expected 'patched: true' in v6 output for is-odd@3.0.1")
+	}
+
+	t.Logf("Generated V6 YAML:\n%s", yaml)
+}

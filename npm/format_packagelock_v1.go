@@ -79,11 +79,17 @@ func buildV1Dependencies(parent *PlacedNode) orderedjson.Map {
 func buildV1DepEntry(placed *PlacedNode, depName string) orderedjson.Map {
 	node := placed.Node
 
-	// Tarball URL aliases: when the dep name differs from the node's real name,
-	// it was resolved from a tarball URL or other alias. Use the TarballURL as version.
+	// Aliases: when the dep name differs from the node's real name.
 	if depName != node.Name && !strings.HasPrefix(node.TarballURL, "file:") && !strings.HasPrefix(node.TarballURL, "git+") {
+		// npm: aliases use "npm:real-name@version" as the version string.
+		// Tarball URL aliases use the tarball URL directly.
+		version := node.TarballURL
+		if !strings.HasPrefix(node.TarballURL, "https://") || node.Version != "0.0.0-local" {
+			version = "npm:" + node.Name + "@" + node.Version
+		}
 		entry := orderedjson.Map{
-			{Key: "version", Value: node.TarballURL},
+			{Key: "version", Value: version},
+			{Key: "resolved", Value: node.TarballURL},
 			{Key: "integrity", Value: node.Integrity},
 		}
 		if len(node.Dependencies) > 0 {

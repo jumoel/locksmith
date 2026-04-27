@@ -15,6 +15,7 @@ import (
 	"github.com/jumoel/locksmith"
 	"github.com/jumoel/locksmith/ecosystem"
 	"github.com/jumoel/locksmith/npm"
+	"gopkg.in/yaml.v3"
 )
 
 // correctnessCase defines a locksmith format paired with the real package manager
@@ -88,6 +89,7 @@ var correctnessMatrix = []correctnessCase{
 	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm@8-v6", []string{"run-pnpm", "8", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, pnpm8Policy},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@9-v9", []string{"run-pnpm", "9", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@10-v9", []string{"run-pnpm", "10", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm@11-v9", []string{"run-pnpm", "11", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, nil},
 
 	// --- pnpm v5.3: pnpm@6 (via @pnpm/exe, bundles own Node) ---
 	{locksmith.FormatPnpmLockV5, "pnpm-lock.yaml", "pnpm@6-v5.3", []string{"run-pnpm", "6", "install", "--lockfile-only", "--ignore-scripts"}, "pnpm-lock.yaml", nil, noPeerAutoInstall},
@@ -102,7 +104,8 @@ var correctnessMatrix = []correctnessCase{
 	{locksmith.FormatYarnBerryV8, "yarn.lock", "yarn@4-v8", []string{"run-yarn", "4", "install"}, "yarn.lock", setupYarnBerry, nil},
 
 	// --- bun ---
-	{locksmith.FormatBunLock, "bun.lock", "bun", []string{"bun", "install", "--save-text-lockfile"}, "bun.lock", nil, nil},
+	{locksmith.FormatBunLock, "bun.lock", "bun@1.2", []string{"run-bun", "1.2", "install", "--save-text-lockfile"}, "bun.lock", nil, nil},
+	{locksmith.FormatBunLock, "bun.lock", "bun@1.3", []string{"run-bun", "1.3", "install", "--save-text-lockfile"}, "bun.lock", nil, nil},
 }
 
 // TestCorrectness generates lockfiles with BOTH locksmith and the real package
@@ -151,6 +154,7 @@ func TestCorrectness(t *testing.T) {
 		// handling differs fundamentally across PM versions; tested via peer_deps_meta_test.go)
 		// pnpm-specific features
 		"pnpm-package-extensions", "pnpm-peer-rules",
+		"pnpm-catalogs", "pnpm-patched",
 		// Platform-specific deps (no platform filter in correctness, so all included)
 		"platform-specific",
 	})
@@ -198,7 +202,7 @@ func TestCorrectness(t *testing.T) {
 
 	// npm overrides fixture only applies to npm and bun.
 	for _, cc := range correctnessMatrix {
-		if !strings.HasPrefix(cc.PMLabel, "npm") && cc.PMLabel != "bun" {
+		if !strings.HasPrefix(cc.PMLabel, "npm") && !strings.HasPrefix(cc.PMLabel, "bun") {
 			skipCombos[cc.PMLabel+"/overrides-npm"] = "npm overrides only apply to npm and bun"
 		}
 	}
@@ -224,7 +228,19 @@ func TestCorrectness(t *testing.T) {
 		if !strings.HasPrefix(cc.PMLabel, "pnpm") {
 			skipCombos[cc.PMLabel+"/pnpm-package-extensions"] = "pnpm packageExtensions only applies to pnpm"
 			skipCombos[cc.PMLabel+"/pnpm-peer-rules"] = "pnpm peerDependencyRules only applies to pnpm"
+			skipCombos[cc.PMLabel+"/pnpm-catalogs"] = "pnpm catalogs only applies to pnpm"
+			skipCombos[cc.PMLabel+"/pnpm-patched"] = "pnpm patchedDependencies only applies to pnpm"
 		}
+	}
+
+	// pnpm catalogs requires pnpm 9+ (catalog: protocol support).
+	for _, pm := range []string{"pnpm@4-v5.1", "pnpm@5-v5.2", "pnpm@6-v5.3", "pnpm@7-v5.4", "pnpm@8-v6"} {
+		skipCombos[pm+"/pnpm-catalogs"] = "pnpm catalogs requires pnpm 9+"
+	}
+
+	// pnpm patchedDependencies requires pnpm 7+ (patch: protocol support).
+	for _, pm := range []string{"pnpm@4-v5.1", "pnpm@5-v5.2", "pnpm@6-v5.3"} {
+		skipCombos[pm+"/pnpm-patched"] = "pnpm patchedDependencies requires pnpm 7+"
 	}
 
 	// pnpm@4-5 don't support packageExtensions; pnpm@4 doesn't support peerDependencyRules.
@@ -299,8 +315,14 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 	}
 
 	// Detect workspace fixtures and pass workspace members.
-	if members := discoverWorkspaceMembersCorrectness(t, filepath.Join("fixtures", fixture), specData); len(members) > 0 {
+	fixtureDir := filepath.Join("fixtures", fixture)
+	if members := discoverWorkspaceMembersCorrectness(t, fixtureDir, specData); len(members) > 0 {
 		opts.WorkspaceMembers = members
+	}
+
+	// Detect pnpm catalogs from pnpm-workspace.yaml.
+	if catalogs := discoverPnpmCatalogsCorrectness(t, fixtureDir); catalogs != nil {
+		opts.Catalogs = catalogs
 	}
 
 	result, err := locksmith.Generate(ctx, opts)
@@ -325,6 +347,9 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 	if err := os.WriteFile(filepath.Join(realDir, "package.json"), specData, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Copy fixture subdirectories and extra root-level files (e.g.,
+	// pnpm-workspace.yaml) so the real PM can read them.
+	copyFixtureSubdirs(t, filepath.Join("fixtures", fixture), realDir)
 	if cc.SetupFunc != nil {
 		cc.SetupFunc(t, realDir)
 	}
@@ -694,4 +719,31 @@ func discoverWorkspaceMembersCorrectness(t *testing.T, fixtureDir string, specDa
 		return nil
 	}
 	return members
+}
+
+func discoverPnpmCatalogsCorrectness(t *testing.T, fixtureDir string) map[string]map[string]string {
+	t.Helper()
+	pnpmPath := filepath.Join(fixtureDir, "pnpm-workspace.yaml")
+	data, err := os.ReadFile(pnpmPath)
+	if err != nil {
+		return nil
+	}
+	var config struct {
+		Catalog  map[string]string            `yaml:"catalog"`
+		Catalogs map[string]map[string]string `yaml:"catalogs"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil
+	}
+	result := config.Catalogs
+	if result == nil {
+		result = make(map[string]map[string]string)
+	}
+	if config.Catalog != nil {
+		result["default"] = config.Catalog
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

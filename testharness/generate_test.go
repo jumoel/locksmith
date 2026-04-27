@@ -12,6 +12,7 @@ import (
 
 	"github.com/jumoel/locksmith"
 	"github.com/jumoel/locksmith/npm"
+	"gopkg.in/yaml.v3"
 )
 
 // formatTestCase defines a lockfile format and its expected output characteristics.
@@ -65,6 +66,11 @@ func TestGenerate(t *testing.T) {
 						t.Skip("workspace-npm-style requires resolve-by-name (npm/yarn classic only)")
 					}
 
+					// pnpm-catalogs uses catalog: protocol which is pnpm-only.
+					if fixture == "pnpm-catalogs" && tc.Ecosystem != "pnpm" {
+						t.Skip("pnpm-catalogs requires pnpm format (catalog: protocol)")
+					}
+
 					specData := readFixture(t, fixture)
 					fixtureDir := filepath.Join("fixtures", fixture)
 
@@ -77,6 +83,11 @@ func TestGenerate(t *testing.T) {
 					// Detect workspace fixtures and pass workspace members.
 					if members := discoverWorkspaceMembers(t, fixtureDir, specData); len(members) > 0 {
 						opts.WorkspaceMembers = members
+					}
+
+					// Detect pnpm catalogs from pnpm-workspace.yaml.
+					if catalogs := discoverPnpmCatalogs(t, fixtureDir); catalogs != nil {
+						opts.Catalogs = catalogs
 					}
 
 					ctx := context.Background()
@@ -224,4 +235,33 @@ func discoverWorkspaceMembers(t *testing.T, fixtureDir string, specData []byte) 
 		return nil
 	}
 	return members
+}
+
+// discoverPnpmCatalogs reads pnpm catalog definitions from pnpm-workspace.yaml
+// in the fixture directory. Returns nil if no catalogs are defined.
+func discoverPnpmCatalogs(t *testing.T, fixtureDir string) map[string]map[string]string {
+	t.Helper()
+	pnpmPath := filepath.Join(fixtureDir, "pnpm-workspace.yaml")
+	data, err := os.ReadFile(pnpmPath)
+	if err != nil {
+		return nil
+	}
+	var config struct {
+		Catalog  map[string]string            `yaml:"catalog"`
+		Catalogs map[string]map[string]string `yaml:"catalogs"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil
+	}
+	result := config.Catalogs
+	if result == nil {
+		result = make(map[string]map[string]string)
+	}
+	if config.Catalog != nil {
+		result["default"] = config.Catalog
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

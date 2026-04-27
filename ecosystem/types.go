@@ -47,6 +47,8 @@ type Node struct {
 	// WorkspacePath is the relative path from the project root to this workspace
 	// member (e.g., "packages/lib-a"). Empty for non-workspace nodes.
 	WorkspacePath string
+	// Patched indicates this package has a pnpm patch applied.
+	Patched bool
 }
 
 // Edge represents a dependency relationship.
@@ -86,6 +88,14 @@ type ProjectSpec struct {
 	// PeerDependencyRules holds parsed pnpm peerDependencyRules that control
 	// peer dep resolution behavior. Nil when no rules are declared.
 	PeerDependencyRules *PeerDependencyRules
+	// Catalogs holds pnpm catalog definitions from pnpm-workspace.yaml.
+	// Key is catalog name ("default" for the unnamed catalog: section),
+	// value maps package name to version constraint.
+	Catalogs map[string]map[string]string
+	// PatchedDependencies maps "name@version" to a patch file path.
+	// Packages matching these entries get Patched=true on their Node and
+	// `patched: true` in the pnpm lockfile.
+	PatchedDependencies map[string]string
 }
 
 // PeerDependencyRules controls peer dep resolution behavior (pnpm feature).

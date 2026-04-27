@@ -63,8 +63,8 @@ var workspaceCorrectnessMatrix = []correctnessCase{
 	{locksmith.FormatYarnBerryV8, "yarn.lock", "yarn@4-v8",
 		[]string{"run-yarn", "4", "install"},
 		"yarn.lock", setupYarnBerry, nil},
-	{locksmith.FormatBunLock, "bun.lock", "bun",
-		[]string{"bun", "install", "--save-text-lockfile"},
+	{locksmith.FormatBunLock, "bun.lock", "bun@1.3",
+		[]string{"run-bun", "1.3", "install", "--save-text-lockfile"},
 		"bun.lock", nil, nil},
 }
 
@@ -101,7 +101,7 @@ func TestWorkspaceCorrectness(t *testing.T) {
 					}
 					// workspace-npm-style uses resolve-by-name which bun/yarn berry don't support.
 					if fixture == "workspace-npm-style" {
-						if cc.PMLabel == "bun" || cc.PMLabel == "yarn@4-v8" {
+						if strings.HasPrefix(cc.PMLabel, "bun") || cc.PMLabel == "yarn@4-v8" {
 							t.Skip("workspace-npm-style requires resolve-by-name (npm/yarn classic only)")
 						}
 					}
@@ -220,8 +220,8 @@ var workspaceAcceptanceMatrix = []verificationCase{
 		[]string{"run-yarn", "1", "install", "--frozen-lockfile"}, nil},
 	{locksmith.FormatYarnBerryV8, "yarn.lock", "yarn", "4",
 		[]string{"run-yarn", "4", "install", "--immutable"}, setupYarnBerry},
-	{locksmith.FormatBunLock, "bun.lock", "bun", "latest",
-		[]string{"bun", "install", "--frozen-lockfile"}, nil},
+	{locksmith.FormatBunLock, "bun.lock", "bun", "1.3",
+		[]string{"run-bun", "1.3", "install", "--frozen-lockfile"}, nil},
 }
 
 // TestWorkspaceAcceptance generates workspace lockfiles with locksmith and

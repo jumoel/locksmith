@@ -348,6 +348,214 @@ func TestRetry_404NotRetried(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Scope registry routing tests
+// ---------------------------------------------------------------------------
+
+func TestRegistryForPackage_ScopeConfigured(t *testing.T) {
+	client := NewRegistryClientWithConfig("https://registry.npmjs.org", map[string]string{
+		"@company": "https://private.registry.com",
+	}, nil)
+
+	got := client.registryForPackage("@company/pkg")
+	want := "https://private.registry.com"
+	if got != want {
+		t.Errorf("registryForPackage(@company/pkg) = %q, want %q", got, want)
+	}
+}
+
+func TestRegistryForPackage_ScopeNotConfigured(t *testing.T) {
+	client := NewRegistryClientWithConfig("https://registry.npmjs.org", map[string]string{
+		"@company": "https://private.registry.com",
+	}, nil)
+
+	got := client.registryForPackage("@other/pkg")
+	want := "https://registry.npmjs.org"
+	if got != want {
+		t.Errorf("registryForPackage(@other/pkg) = %q, want %q", got, want)
+	}
+}
+
+func TestRegistryForPackage_UnscopedPackage(t *testing.T) {
+	client := NewRegistryClientWithConfig("https://registry.npmjs.org", map[string]string{
+		"@company": "https://private.registry.com",
+	}, nil)
+
+	got := client.registryForPackage("lodash")
+	want := "https://registry.npmjs.org"
+	if got != want {
+		t.Errorf("registryForPackage(lodash) = %q, want %q", got, want)
+	}
+}
+
+func TestRegistryForPackage_MultipleScopes(t *testing.T) {
+	client := NewRegistryClientWithConfig("https://registry.npmjs.org", map[string]string{
+		"@company": "https://private.registry.com",
+		"@internal": "https://internal.registry.com",
+	}, nil)
+
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"@company/foo", "https://private.registry.com"},
+		{"@internal/bar", "https://internal.registry.com"},
+		{"@other/baz", "https://registry.npmjs.org"},
+		{"unscoped", "https://registry.npmjs.org"},
+	}
+	for _, tt := range tests {
+		got := client.registryForPackage(tt.name)
+		if got != tt.want {
+			t.Errorf("registryForPackage(%s) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestRegistryForPackage_NilScopeRegistries(t *testing.T) {
+	client := NewRegistryClient("https://registry.npmjs.org")
+
+	got := client.registryForPackage("@company/pkg")
+	want := "https://registry.npmjs.org"
+	if got != want {
+		t.Errorf("registryForPackage(@company/pkg) with nil scopes = %q, want %q", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Auth token tests
+// ---------------------------------------------------------------------------
+
+func TestAuthToken_SentWhenConfigured(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		// Return a minimal valid packument.
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"name":"test-pkg","versions":{"1.0.0":{"name":"test-pkg","version":"1.0.0","dist":{"tarball":"http://x/t.tgz","shasum":"abc"}}},"time":{"1.0.0":"2020-01-01T00:00:00.000Z"},"dist-tags":{"latest":"1.0.0"}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClientWithConfig(srv.URL, nil, map[string]string{
+		srv.URL: "my-secret-token",
+	})
+	_, err := client.FetchVersions(context.Background(), "test-pkg", nil)
+	if err != nil {
+		t.Fatalf("FetchVersions: %v", err)
+	}
+	want := "Bearer my-secret-token"
+	if gotAuth != want {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, want)
+	}
+}
+
+func TestAuthToken_NotSentWhenNotConfigured(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"name":"test-pkg","versions":{"1.0.0":{"name":"test-pkg","version":"1.0.0","dist":{"tarball":"http://x/t.tgz","shasum":"abc"}}},"time":{"1.0.0":"2020-01-01T00:00:00.000Z"},"dist-tags":{"latest":"1.0.0"}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClientWithConfig(srv.URL, nil, nil)
+	_, err := client.FetchVersions(context.Background(), "test-pkg", nil)
+	if err != nil {
+		t.Fatalf("FetchVersions: %v", err)
+	}
+	if gotAuth != "" {
+		t.Errorf("Authorization header = %q, want empty (no token configured)", gotAuth)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Combined scope routing + auth test
+// ---------------------------------------------------------------------------
+
+func TestScopeRouting_WithAuth(t *testing.T) {
+	minimalPackument := `{"name":"pkg","versions":{"1.0.0":{"name":"pkg","version":"1.0.0","dist":{"tarball":"http://x/t.tgz","shasum":"abc"}}},"time":{"1.0.0":"2020-01-01T00:00:00.000Z"},"dist-tags":{"latest":"1.0.0"}}`
+
+	var publicAuth, privateAuth string
+	var publicHits, privateHits int
+
+	publicSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		publicHits++
+		publicAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(minimalPackument))
+	}))
+	t.Cleanup(publicSrv.Close)
+
+	privateSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		privateHits++
+		privateAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(minimalPackument))
+	}))
+	t.Cleanup(privateSrv.Close)
+
+	client := NewRegistryClientWithConfig(publicSrv.URL, map[string]string{
+		"@company": privateSrv.URL,
+	}, map[string]string{
+		privateSrv.URL: "private-token",
+	})
+
+	ctx := context.Background()
+
+	// Scoped package should hit private server with auth.
+	_, err := client.FetchVersions(ctx, "@company/pkg", nil)
+	if err != nil {
+		t.Fatalf("FetchVersions @company/pkg: %v", err)
+	}
+	if privateHits != 1 {
+		t.Errorf("private server hits = %d, want 1", privateHits)
+	}
+	if publicHits != 0 {
+		t.Errorf("public server hits = %d, want 0 (scoped pkg should not hit public)", publicHits)
+	}
+	if privateAuth != "Bearer private-token" {
+		t.Errorf("private server auth = %q, want %q", privateAuth, "Bearer private-token")
+	}
+
+	// Unscoped package should hit public server without auth.
+	_, err = client.FetchVersions(ctx, "lodash", nil)
+	if err != nil {
+		t.Fatalf("FetchVersions lodash: %v", err)
+	}
+	if publicHits != 1 {
+		t.Errorf("public server hits = %d, want 1", publicHits)
+	}
+	if publicAuth != "" {
+		t.Errorf("public server auth = %q, want empty", publicAuth)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Backward compatibility test
+// ---------------------------------------------------------------------------
+
+func TestNewRegistryClient_BackwardCompatible(t *testing.T) {
+	client := NewRegistryClient("https://custom.registry.com")
+	if client.baseURL != "https://custom.registry.com" {
+		t.Errorf("baseURL = %q, want %q", client.baseURL, "https://custom.registry.com")
+	}
+	if client.scopeRegistries != nil {
+		t.Errorf("scopeRegistries = %v, want nil", client.scopeRegistries)
+	}
+	if client.authTokens != nil {
+		t.Errorf("authTokens = %v, want nil", client.authTokens)
+	}
+	if client.cache == nil {
+		t.Error("cache is nil, want initialized map")
+	}
+}
+
+func TestNewRegistryClient_DefaultURL(t *testing.T) {
+	client := NewRegistryClient("")
+	if client.baseURL != "https://registry.npmjs.org" {
+		t.Errorf("baseURL = %q, want %q", client.baseURL, "https://registry.npmjs.org")
+	}
+}
+
 func TestScopedPackage(t *testing.T) {
 	srv, _ := newTestServer(t)
 	client := NewRegistryClient(srv.URL)

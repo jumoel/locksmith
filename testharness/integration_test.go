@@ -12,6 +12,7 @@ import (
 
 	"github.com/jumoel/locksmith"
 	"github.com/jumoel/locksmith/npm"
+	"gopkg.in/yaml.v3"
 )
 
 const dockerImage = "locksmith-test-runner"
@@ -76,9 +77,10 @@ var verificationMatrix = []verificationCase{
 	// pnpm-lock-v6: pnpm 8.
 	{locksmith.FormatPnpmLockV6, "pnpm-lock.yaml", "pnpm", "8", []string{"run-pnpm", "8", "install", "--frozen-lockfile"}, nil},
 
-	// pnpm-lock-v9: pnpm 9 and 10.
+	// pnpm-lock-v9: pnpm 9, 10, and 11.
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm", "9", []string{"run-pnpm", "9", "install", "--frozen-lockfile"}, nil},
 	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm", "10", []string{"run-pnpm", "10", "install", "--frozen-lockfile"}, nil},
+	{locksmith.FormatPnpmLockV9, "pnpm-lock.yaml", "pnpm", "11", []string{"run-pnpm", "11", "install", "--frozen-lockfile"}, nil},
 
 	// yarn-classic: yarn 1.
 	{locksmith.FormatYarnClassic, "yarn.lock", "yarn", "1", []string{"run-yarn", "1", "install", "--frozen-lockfile"}, nil},
@@ -95,8 +97,9 @@ var verificationMatrix = []verificationCase{
 	// yarn-berry-v8: yarn 4.
 	{locksmith.FormatYarnBerryV8, "yarn.lock", "yarn", "4", []string{"run-yarn", "4", "install", "--immutable"}, setupYarnBerry},
 
-	// bun-lock: bun (latest).
-	{locksmith.FormatBunLock, "bun.lock", "bun", "latest", []string{"bun", "install", "--frozen-lockfile"}, nil},
+	// bun-lock: bun 1.2 and 1.3.
+	{locksmith.FormatBunLock, "bun.lock", "bun", "1.2", []string{"run-bun", "1.2", "install", "--frozen-lockfile"}, nil},
+	{locksmith.FormatBunLock, "bun.lock", "bun", "1.3", []string{"run-bun", "1.3", "install", "--frozen-lockfile"}, nil},
 }
 
 func TestMain(m *testing.M) {
@@ -228,6 +231,22 @@ func TestIntegration(t *testing.T) {
 					if fixture == "pnpm-peer-rules" && vc.PMName != "pnpm" {
 						t.Skip("pnpm peerDependencyRules fixture only applies to pnpm")
 					}
+					if fixture == "pnpm-catalogs" {
+						if vc.PMName != "pnpm" {
+							t.Skip("pnpm catalogs fixture only applies to pnpm")
+						}
+						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" || vc.PMVersion == "7" || vc.PMVersion == "8" {
+							t.Skip("pnpm catalogs requires pnpm 9+")
+						}
+					}
+					if fixture == "pnpm-patched" {
+						if vc.PMName != "pnpm" {
+							t.Skip("pnpm patchedDependencies fixture only applies to pnpm")
+						}
+						if vc.PMVersion == "4" || vc.PMVersion == "5" || vc.PMVersion == "6" {
+							t.Skip("pnpm patchedDependencies requires pnpm 7+")
+						}
+					}
 					t.Parallel()
 					runVerification(t, vc, fixture)
 				})
@@ -278,6 +297,11 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 	// Detect workspace fixtures and pass workspace members.
 	if members := discoverWorkspaceMembersInteg(t, fixtureDir, specData); len(members) > 0 {
 		opts.WorkspaceMembers = members
+	}
+
+	// Detect pnpm catalogs from pnpm-workspace.yaml.
+	if catalogs := discoverPnpmCatalogsInteg(t, fixtureDir); catalogs != nil {
+		opts.Catalogs = catalogs
 	}
 
 	result, err := locksmith.Generate(ctx, opts)
@@ -337,9 +361,10 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 		strings.TrimSpace(string(output)))
 }
 
-// copyFixtureSubdirs copies subdirectories from a fixture into the target dir.
-// This supports fixtures with local packages (file: deps) that need to exist
-// alongside package.json in the Docker mount.
+// copyFixtureSubdirs copies subdirectories and extra root-level files from a
+// fixture into the target dir. Subdirectories support local packages (file:
+// deps). Root-level files like pnpm-workspace.yaml are needed by real PMs
+// during Docker-based verification.
 func copyFixtureSubdirs(t *testing.T, fixtureDir, targetDir string) {
 	t.Helper()
 	entries, err := os.ReadDir(fixtureDir)
@@ -347,13 +372,24 @@ func copyFixtureSubdirs(t *testing.T, fixtureDir, targetDir string) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		src := filepath.Join(fixtureDir, e.Name())
 		dst := filepath.Join(targetDir, e.Name())
-		if err := copyDir(src, dst); err != nil {
-			t.Fatalf("copying fixture subdir %s: %v", e.Name(), err)
+		if e.IsDir() {
+			if err := copyDir(src, dst); err != nil {
+				t.Fatalf("copying fixture subdir %s: %v", e.Name(), err)
+			}
+			continue
+		}
+		// Copy root-level files except package.json (already written separately).
+		if e.Name() == "package.json" {
+			continue
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatalf("reading fixture file %s: %v", e.Name(), err)
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			t.Fatalf("writing fixture file %s: %v", e.Name(), err)
 		}
 	}
 }
@@ -413,4 +449,31 @@ func discoverWorkspaceMembersInteg(t *testing.T, fixtureDir string, specData []b
 		return nil
 	}
 	return members
+}
+
+func discoverPnpmCatalogsInteg(t *testing.T, fixtureDir string) map[string]map[string]string {
+	t.Helper()
+	pnpmPath := filepath.Join(fixtureDir, "pnpm-workspace.yaml")
+	data, err := os.ReadFile(pnpmPath)
+	if err != nil {
+		return nil
+	}
+	var config struct {
+		Catalog  map[string]string            `yaml:"catalog"`
+		Catalogs map[string]map[string]string `yaml:"catalogs"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil
+	}
+	result := config.Catalogs
+	if result == nil {
+		result = make(map[string]map[string]string)
+	}
+	if config.Catalog != nil {
+		result["default"] = config.Catalog
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
