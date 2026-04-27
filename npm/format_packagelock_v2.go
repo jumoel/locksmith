@@ -40,8 +40,18 @@ func (f *PackageLockV2Formatter) FormatFromResult(result *ResolveResult, project
 		}
 	}
 
+	// Build map of npm: alias deps from root edges.
+	npmAliases := make(map[string]bool)
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil && strings.HasPrefix(edge.Constraint, "npm:") {
+				npmAliases[edge.Name] = true
+			}
+		}
+	}
+
 	// Build the hierarchical dependencies (same as v1).
-	deps := buildV1Dependencies(result.Root)
+	deps := buildV1Dependencies(result.Root, npmAliases)
 
 	lockfile := orderedjson.Map{
 		{Key: "name", Value: project.Name},

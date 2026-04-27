@@ -34,8 +34,20 @@ func (f *PackageLockV1Formatter) FormatFromResult(result *ResolveResult, project
 		{Key: "requires", Value: true},
 	}
 
+	// Build map of npm: alias deps from root edges. Tarball URL deps and git
+	// deps where depName != node.Name look similar to aliases in the placed
+	// tree but need different formatting (URL as version, not npm:name@ver).
+	npmAliases := make(map[string]bool)
+	if result.Graph != nil && result.Graph.Root != nil {
+		for _, edge := range result.Graph.Root.Dependencies {
+			if edge.Target != nil && strings.HasPrefix(edge.Constraint, "npm:") {
+				npmAliases[edge.Name] = true
+			}
+		}
+	}
+
 	// Build hierarchical dependencies from the placed node tree.
-	deps := buildV1Dependencies(result.Root)
+	deps := buildV1Dependencies(result.Root, npmAliases)
 	if deps != nil {
 		lockfile = append(lockfile, orderedjson.Entry{Key: "dependencies", Value: deps})
 	}
@@ -53,7 +65,7 @@ func (f *PackageLockV1Formatter) FormatFromResult(result *ResolveResult, project
 
 // buildV1Dependencies recursively constructs the hierarchical dependencies
 // section from a placed node's children.
-func buildV1Dependencies(parent *PlacedNode) orderedjson.Map {
+func buildV1Dependencies(parent *PlacedNode, npmAliases map[string]bool) orderedjson.Map {
 	if len(parent.Children) == 0 {
 		return nil
 	}
@@ -68,7 +80,7 @@ func buildV1Dependencies(parent *PlacedNode) orderedjson.Map {
 	deps := make(orderedjson.Map, 0, len(names))
 	for _, name := range names {
 		child := parent.Children[name]
-		entry := buildV1DepEntry(child, name)
+		entry := buildV1DepEntry(child, name, npmAliases)
 		deps = append(deps, orderedjson.Entry{Key: name, Value: entry})
 	}
 
@@ -76,18 +88,14 @@ func buildV1Dependencies(parent *PlacedNode) orderedjson.Map {
 }
 
 // buildV1DepEntry constructs a single dependency entry in the v1 format.
-func buildV1DepEntry(placed *PlacedNode, depName string) orderedjson.Map {
+func buildV1DepEntry(placed *PlacedNode, depName string, npmAliases map[string]bool) orderedjson.Map {
 	node := placed.Node
 
-	// Aliases: when the dep name differs from the node's real name.
-	// Exclude non-registry deps (file:, git+, github:) which have their own handling below.
-	if depName != node.Name && !strings.HasPrefix(node.TarballURL, "file:") && !strings.HasPrefix(node.TarballURL, "git+") && !strings.HasPrefix(node.TarballURL, "github:") {
-		// npm: aliases use "npm:real-name@version" as the version string.
-		// Tarball URL aliases use the tarball URL directly.
-		version := node.TarballURL
-		if !strings.HasPrefix(node.TarballURL, "https://") || node.Version != "0.0.0-local" {
-			version = "npm:" + node.Name + "@" + node.Version
-		}
+	// npm: aliases use "npm:real-name@version" as the version. Only applies
+	// to deps explicitly declared with the npm: prefix, not tarball URL or
+	// git deps that happen to resolve to a different package name.
+	if npmAliases[depName] && depName != node.Name {
+		version := "npm:" + node.Name + "@" + node.Version
 		entry := orderedjson.Map{
 			{Key: "version", Value: version},
 			{Key: "resolved", Value: node.TarballURL},
@@ -100,7 +108,7 @@ func buildV1DepEntry(placed *PlacedNode, depName string) orderedjson.Map {
 			}
 			entry = append(entry, orderedjson.Entry{Key: "requires", Value: orderedjson.FromStringMap(requires)})
 		}
-		nestedDeps := buildV1Dependencies(placed)
+		nestedDeps := buildV1Dependencies(placed, npmAliases)
 		if nestedDeps != nil {
 			entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: nestedDeps})
 		}
@@ -112,7 +120,7 @@ func buildV1DepEntry(placed *PlacedNode, depName string) orderedjson.Map {
 		entry := orderedjson.Map{
 			{Key: "version", Value: node.TarballURL},
 		}
-		nestedDeps := buildV1Dependencies(placed)
+		nestedDeps := buildV1Dependencies(placed, npmAliases)
 		if nestedDeps != nil {
 			entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: nestedDeps})
 		}
@@ -131,7 +139,7 @@ func buildV1DepEntry(placed *PlacedNode, depName string) orderedjson.Map {
 			}
 			entry = append(entry, orderedjson.Entry{Key: "requires", Value: orderedjson.FromStringMap(requires)})
 		}
-		nestedDeps := buildV1Dependencies(placed)
+		nestedDeps := buildV1Dependencies(placed, npmAliases)
 		if nestedDeps != nil {
 			entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: nestedDeps})
 		}
@@ -163,7 +171,7 @@ func buildV1DepEntry(placed *PlacedNode, depName string) orderedjson.Map {
 	}
 
 	// Nested dependencies (children that couldn't be hoisted).
-	nestedDeps := buildV1Dependencies(placed)
+	nestedDeps := buildV1Dependencies(placed, npmAliases)
 	if nestedDeps != nil {
 		entry = append(entry, orderedjson.Entry{Key: "dependencies", Value: nestedDeps})
 	}
