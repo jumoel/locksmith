@@ -623,23 +623,32 @@ func TestPnpmLockV9_PatchedDependency(t *testing.T) {
 	yaml := string(output)
 	t.Logf("Generated YAML:\n%s", yaml)
 
-	// patchedDependencies top-level field with hash.
+	patchKeySuffix := "(patch_hash=" + patchHash + ")"
+
+	// patchedDependencies: nested object with hash and path fields.
 	if !strings.Contains(yaml, "patchedDependencies:") {
 		t.Error("expected patchedDependencies top-level field")
 	}
-	if !strings.Contains(yaml, "is-odd@3.0.1: "+patchHash) {
-		t.Error("expected patch hash in patchedDependencies field")
+	if !strings.Contains(yaml, "hash: "+patchHash) {
+		t.Error("expected hash field in patchedDependencies entry")
+	}
+	if !strings.Contains(yaml, "path: patches/is-odd@3.0.1.patch") {
+		t.Error("expected path field in patchedDependencies entry")
 	}
 
-	// Package key should include patch_hash suffix.
-	patchKeySuffix := "(patch_hash=" + patchHash + ")"
-	if !strings.Contains(yaml, "is-odd@3.0.1"+patchKeySuffix) {
-		t.Errorf("expected patch_hash suffix in package key, looking for is-odd@3.0.1%s", patchKeySuffix)
+	// packages section: bare key WITHOUT patch_hash suffix, no patched: true.
+	// pnpm keeps packages keys clean; the suffix only goes in snapshots/importers.
+	packagesIdx := strings.Index(yaml, "packages:")
+	snapshotsIdx := strings.Index(yaml, "snapshots:")
+	packagesSection := yaml[packagesIdx:snapshotsIdx]
+	if strings.Contains(packagesSection, patchKeySuffix) {
+		t.Error("packages section should NOT have patch_hash suffix on keys")
 	}
 
-	// patched: true still present.
-	if !strings.Contains(yaml, "patched: true") {
-		t.Error("expected 'patched: true' in output")
+	// snapshots section: key WITH patch_hash suffix.
+	snapshotsSection := yaml[snapshotsIdx:]
+	if !strings.Contains(snapshotsSection, "is-odd@3.0.1"+patchKeySuffix) {
+		t.Error("expected patch_hash suffix in snapshots key")
 	}
 
 	// Importer version should include patch_hash.

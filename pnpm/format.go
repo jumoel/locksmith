@@ -60,11 +60,18 @@ func (f *PnpmLockV9Formatter) FormatFromResult(result *ResolveResult, project *e
 	}
 	addMapping(root, "settings", settings)
 
-	// patchedDependencies (only if there are patched deps with hashes)
+	// patchedDependencies: nested objects with hash and path fields.
 	if len(result.PatchHashes) > 0 {
 		patchedNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, key := range maputil.SortedMapKeys(result.PatchHashes) {
-			addMapping(patchedNode, key, scalarNode(result.PatchHashes[key], 0))
+			entryNode := &yaml.Node{Kind: yaml.MappingNode}
+			addMapping(entryNode, "hash", scalarNode(result.PatchHashes[key], 0))
+			if project.PatchedDependencies != nil {
+				if path, ok := project.PatchedDependencies[key]; ok {
+					addMapping(entryNode, "path", scalarNode(path, 0))
+				}
+			}
+			addMapping(patchedNode, key, entryNode)
 		}
 		addMapping(root, "patchedDependencies", patchedNode)
 	}
@@ -347,11 +354,7 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 	return node
 }
 
-// pnpmPackageKey returns the pnpm v9 package key for a resolved package.
-// For git deps: name@git+https://...#hash
-// For file: deps: name@file:path
-// For patched deps: name@version(patch_hash=hash)
-// For regular deps: name@version
+// pnpmPackageKey returns the pnpm v9 packages section key (no patch suffix).
 func pnpmPackageKey(pkg *ResolvedPackage) string {
 	url := pkg.Node.TarballURL
 	if strings.HasPrefix(url, "git+") {
@@ -360,7 +363,13 @@ func pnpmPackageKey(pkg *ResolvedPackage) string {
 	if strings.HasPrefix(url, "file:") {
 		return pkg.Node.Name + "@" + url
 	}
-	key := pkg.Node.Name + "@" + pkg.Node.Version
+	return pkg.Node.Name + "@" + pkg.Node.Version
+}
+
+// pnpmSnapshotKey returns the pnpm v9 snapshots section key.
+// Patched deps get a (patch_hash=...) suffix; regular deps are the same as package keys.
+func pnpmSnapshotKey(pkg *ResolvedPackage) string {
+	key := pnpmPackageKey(pkg)
 	if pkg.Node.Patched && pkg.Node.PatchHash != "" {
 		key += "(patch_hash=" + pkg.Node.PatchHash + ")"
 	}
@@ -415,10 +424,6 @@ func buildPackages(result *ResolveResult, wsNames map[string]bool) *yaml.Node {
 			addMapping(pkgNode, "resolution", resolution)
 		}
 
-		if pkg.Node.Patched {
-			addMapping(pkgNode, "patched", scalarNode("true", 0))
-		}
-
 		displayKey := pnpmPackageKey(pkg)
 
 		if len(pkg.Node.Engines) > 0 {
@@ -471,7 +476,7 @@ func buildSnapshots(result *ResolveResult, wsNames map[string]bool) *yaml.Node {
 			addMapping(snapNode, "dependencies", depsNode)
 		}
 
-		addMapping(node, pnpmPackageKey(pkg), snapNode)
+		addMapping(node, pnpmSnapshotKey(pkg), snapNode)
 	}
 
 	return node
