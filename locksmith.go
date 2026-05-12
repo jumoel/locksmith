@@ -360,7 +360,9 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		formatter = yarn.NewYarnBerryV6Formatter()
 	case FormatYarnBerryV8:
 		resolver = yarn.NewBerryResolver()
-		formatter = yarn.NewYarnBerryV8Formatter()
+		v8 := yarn.NewYarnBerryV8Formatter()
+		v8.CompressionLevel = opts.YarnCompressionLevel
+		formatter = v8
 	}
 	resolver.PolicyOverride = opts.PolicyOverride
 

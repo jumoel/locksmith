@@ -62,9 +62,23 @@ func (f *YarnBerryV6Formatter) FormatFromResult(result *ResolveResult, project *
 }
 
 // YarnBerryV8Formatter produces yarn.lock output in yarn berry v8 format (yarn 4).
-type YarnBerryV8Formatter struct{}
+//
+// CompressionLevel mirrors the `compressionLevel` setting in `.yarnrc.yml`.
+// Yarn 4 derives the lockfile's `cacheKey` suffix from this:
+//
+//	""       (default 0)  -> cacheKey: 10c0
+//	"0"                   -> cacheKey: 10c0
+//	"<n>"   numeric 1-9   -> cacheKey: 10c<n>
+//	"mixed"               -> cacheKey: 10  (no suffix)
+//
+// Yarn rejects `--immutable` installs that would change `cacheKey`, so the
+// formatter must match the value yarn would emit for the project's config.
+type YarnBerryV8Formatter struct {
+	CompressionLevel string
+}
 
-// NewYarnBerryV8Formatter returns a new yarn berry v8 formatter.
+// NewYarnBerryV8Formatter returns a new yarn berry v8 formatter with the
+// default compression level (cacheKey 10c0).
 func NewYarnBerryV8Formatter() *YarnBerryV8Formatter {
 	return &YarnBerryV8Formatter{}
 }
@@ -79,8 +93,21 @@ func (f *YarnBerryV8Formatter) Format(_ *ecosystem.Graph, _ *ecosystem.ProjectSp
 // FormatFromResult produces yarn.lock v8 bytes from a resolve result.
 func (f *YarnBerryV8Formatter) FormatFromResult(result *ResolveResult, project *ecosystem.ProjectSpec) ([]byte, error) {
 	return formatBerryWithConfig(result, project, berryConfig{
-		MetadataVersion: 8, CacheKey: "10c0", ChecksumPrefix: "10/", IncludeRoot: true, RootDepsNpmPrefix: true,
+		MetadataVersion: 8, CacheKey: berryV8CacheKey(f.CompressionLevel), ChecksumPrefix: "10/", IncludeRoot: true, RootDepsNpmPrefix: true,
 	})
+}
+
+// berryV8CacheKey maps a yarnrc `compressionLevel` to the v8 lockfile cacheKey
+// value. See YarnBerryV8Formatter.CompressionLevel for the mapping.
+func berryV8CacheKey(compressionLevel string) string {
+	switch compressionLevel {
+	case "", "0":
+		return "10c0"
+	case "mixed":
+		return "10"
+	default:
+		return "10c" + compressionLevel
+	}
 }
 
 // berryEntry holds the data for a single yarn berry lockfile entry.
@@ -93,13 +120,13 @@ type berryEntry struct {
 
 // berryConfig holds format-specific settings that differ between berry versions.
 type berryConfig struct {
-	MetadataVersion    int
-	CacheKey           string
-	ChecksumPrefix     string // "10/" for v8, "" for v5-v6
-	IncludeRoot        bool   // true for yarn berry (adds workspace root entry)
-	SkipChecksum       bool   // v4/v5: omit checksums (yarn 2/3.1 computes cache-specific hashes)
-	RootDepsNpmPrefix  bool   // v8: root deps use "npm:constraint" format
-	ProjectName        string // for portal: locator suffix on file: deps
+	MetadataVersion   int
+	CacheKey          string
+	ChecksumPrefix    string // "10/" for v8, "" for v5-v6
+	IncludeRoot       bool   // true for yarn berry (adds workspace root entry)
+	SkipChecksum      bool   // v4/v5: omit checksums (yarn 2/3.1 computes cache-specific hashes)
+	RootDepsNpmPrefix bool   // v8: root deps use "npm:constraint" format
+	ProjectName       string // for portal: locator suffix on file: deps
 }
 
 func formatBerryWithConfig(result *ResolveResult, project *ecosystem.ProjectSpec, cfg berryConfig) ([]byte, error) {
@@ -461,9 +488,9 @@ func deduplicateConstraints(constraints []string) []string {
 
 	// Group constraints by package name (before @npm:).
 	type parsed struct {
-		full    string
-		name    string
-		semver  *semver.Version
+		full   string
+		name   string
+		semver *semver.Version
 	}
 
 	byName := make(map[string][]parsed)

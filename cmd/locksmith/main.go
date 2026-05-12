@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jumoel/locksmith"
+	"github.com/jumoel/locksmith/internal/yarnrc"
 	"github.com/spf13/cobra"
 )
 
@@ -34,17 +35,19 @@ func rootCmd() *cobra.Command {
 
 func generateCmd() *cobra.Command {
 	var (
-		specPath        string
-		format          string
-		cutoffStr       string
-		registryURL     string
-		outputPath      string
-		platform        string
-		nodeVersion     string
-		scopeRegistries []string
-		authTokens      []string
-		timeoutDuration time.Duration
-		verbose         bool
+		specPath             string
+		format               string
+		cutoffStr            string
+		registryURL          string
+		outputPath           string
+		platform             string
+		nodeVersion          string
+		scopeRegistries      []string
+		authTokens           []string
+		timeoutDuration      time.Duration
+		verbose              bool
+		yarnrcPath           string
+		yarnCompressionLevel string
 	)
 
 	cmd := &cobra.Command{
@@ -87,18 +90,31 @@ func generateCmd() *cobra.Command {
 				return err
 			}
 
+			// Resolve yarn compressionLevel. The explicit flag wins; otherwise
+			// fall back to reading it from --yarnrc-path. Locksmith needs this
+			// to emit the v8 lockfile's cacheKey byte-identically to yarn 4.
+			compressionLevel := yarnCompressionLevel
+			if compressionLevel == "" && yarnrcPath != "" {
+				cl, err := yarnrc.ReadCompressionLevel(yarnrcPath)
+				if err != nil {
+					return fmt.Errorf("reading yarnrc: %w", err)
+				}
+				compressionLevel = cl
+			}
+
 			// Parse cutoff date
 			opts := locksmith.GenerateOptions{
-				SpecFile:         specData,
-				OutputFormat:     outputFormat,
-				RegistryURL:      registryURL,
-				ScopeRegistries:  scopeRegs,
-				AuthTokens:       authToks,
-				Platform:         platform,
-				SpecDir:          filepath.Dir(specPath),
-				WorkspaceMembers: members,
-				NodeVersion:      nodeVersion,
-				Catalogs:         catalogs,
+				SpecFile:             specData,
+				OutputFormat:         outputFormat,
+				RegistryURL:          registryURL,
+				ScopeRegistries:      scopeRegs,
+				AuthTokens:           authToks,
+				Platform:             platform,
+				SpecDir:              filepath.Dir(specPath),
+				WorkspaceMembers:     members,
+				NodeVersion:          nodeVersion,
+				Catalogs:             catalogs,
+				YarnCompressionLevel: compressionLevel,
 			}
 			if cutoffStr != "" {
 				t, err := time.Parse(time.RFC3339, cutoffStr)
@@ -167,6 +183,8 @@ func generateCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&authTokens, "auth-token", nil, "url=token pairs for per-registry Bearer auth (e.g., https://private.registry.com=secrettoken)")
 	cmd.Flags().DurationVar(&timeoutDuration, "timeout", 0, "abort generation after this duration (e.g. 5m, 30s); 0 means no timeout")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "emit a heartbeat to stderr every 5s so long-running runs are observable")
+	cmd.Flags().StringVar(&yarnrcPath, "yarnrc-path", "", "path to .yarnrc.yml; locksmith reads compressionLevel from it to match yarn 4's cacheKey")
+	cmd.Flags().StringVar(&yarnCompressionLevel, "yarn-compression-level", "", "override yarn compressionLevel directly (e.g. mixed, 0, 9); takes precedence over --yarnrc-path")
 
 	_ = cmd.MarkFlagRequired("spec")
 	_ = cmd.MarkFlagRequired("format")

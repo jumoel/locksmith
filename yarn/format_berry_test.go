@@ -883,3 +883,49 @@ func TestBerry_AliasedDep(t *testing.T) {
 		})
 	}
 }
+
+// TestBerryCacheKeyWithCompressionLevel verifies that the cacheKey suffix in
+// v8 (yarn 4) lockfiles reflects the yarnrc `compressionLevel` setting. Yarn
+// 4's default is `mixed`, which yields `cacheKey: 10`; explicit numeric levels
+// yield `cacheKey: 10c<N>`; level 0 yields `cacheKey: 10c0`.
+//
+// Without this, locksmith hardcodes 10c0 and any project with a non-default
+// compressionLevel fails yarn's `--immutable` post-resolution check with
+// YN0028 "lockfile would have been modified".
+func TestBerryCacheKeyWithCompressionLevel(t *testing.T) {
+	cases := []struct {
+		name             string
+		compressionLevel string
+		wantCacheKey     string
+	}{
+		{"default-empty", "", "10c0"},
+		{"explicit-0", "0", "10c0"},
+		{"mixed", "mixed", "10"},
+		{"level-1", "1", "10c1"},
+		{"level-9", "9", "10c9"},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "compression-test",
+		Version: "1.0.0",
+	}
+	result := &ResolveResult{
+		Graph:    &ecosystem.Graph{Root: &ecosystem.Node{Name: "compression-test", Version: "1.0.0"}},
+		Packages: map[string]*ResolvedPackage{},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := NewYarnBerryV8Formatter()
+			f.CompressionLevel = tc.compressionLevel
+			data, err := f.FormatFromResult(result, project)
+			if err != nil {
+				t.Fatalf("FormatFromResult failed: %v", err)
+			}
+			want := "cacheKey: " + tc.wantCacheKey + "\n"
+			if !strings.Contains(string(data), want) {
+				t.Errorf("expected %q in output, got:\n%s", want, string(data))
+			}
+		})
+	}
+}

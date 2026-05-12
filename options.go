@@ -111,4 +111,10 @@ type GenerateOptions struct {
 	// instead of the default SHA256 hex (pnpm 10+). Only affects pnpm lockfile
 	// generation when PatchedDependencies are present.
 	PnpmPatchHashMD5 bool
+
+	// YarnCompressionLevel mirrors `.yarnrc.yml`'s `compressionLevel` setting.
+	// Yarn 4 (FormatYarnBerryV8) derives the lockfile's `cacheKey` suffix from
+	// this value (see yarn.YarnBerryV8Formatter for the mapping). Required to
+	// match `cacheKey` exactly under `yarn install --immutable`.
+	YarnCompressionLevel string
 }
