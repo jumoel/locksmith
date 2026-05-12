@@ -52,33 +52,33 @@ func (fm *FlexMap) UnmarshalJSON(data []byte) error {
 
 // Packument is the full package document from the npm registry.
 type Packument struct {
-	ID       string                     `json:"_id"`
-	Name     string                     `json:"name"`
-	DistTags map[string]string          `json:"dist-tags"`
-	Versions map[string]Version         `json:"versions"`
-	Time     map[string]string          `json:"time,omitempty"`
+	ID       string             `json:"_id"`
+	Name     string             `json:"name"`
+	DistTags map[string]string  `json:"dist-tags"`
+	Versions map[string]Version `json:"versions"`
+	Time     map[string]string  `json:"time,omitempty"`
 }
 
 // Version represents a specific version of a package in the registry.
 type Version struct {
-	Name                 string                  `json:"name"`
-	Version              string                  `json:"version"`
-	Dependencies         FlexMap                 `json:"dependencies,omitempty"`
-	DevDependencies      FlexMap                 `json:"devDependencies,omitempty"`
-	PeerDependencies     FlexMap                 `json:"peerDependencies,omitempty"`
-	OptionalDependencies FlexMap                 `json:"optionalDependencies,omitempty"`
-	PeerDependenciesMeta map[string]PeerMeta     `json:"peerDependenciesMeta,omitempty"`
-	BundleDependencies   json.RawMessage         `json:"bundleDependencies,omitempty"`
-	BundledDependencies  json.RawMessage         `json:"bundledDependencies,omitempty"`
-	Dist                 Dist                    `json:"dist"`
-	Engines              FlexMap                 `json:"engines,omitempty"`
-	OS                   []string                `json:"os,omitempty"`
-	CPU                  []string                `json:"cpu,omitempty"`
-	Scripts              map[string]string       `json:"scripts,omitempty"`
-	Bin                  json.RawMessage         `json:"bin,omitempty"`
-	License              LicenseField            `json:"license,omitempty"`
-	Deprecated           FlexString              `json:"deprecated,omitempty"`
-	Funding              json.RawMessage         `json:"funding,omitempty"`
+	Name                 string                     `json:"name"`
+	Version              string                     `json:"version"`
+	Dependencies         FlexMap                    `json:"dependencies,omitempty"`
+	DevDependencies      FlexMap                    `json:"devDependencies,omitempty"`
+	PeerDependencies     FlexMap                    `json:"peerDependencies,omitempty"`
+	OptionalDependencies FlexMap                    `json:"optionalDependencies,omitempty"`
+	PeerDependenciesMeta map[string]PeerMeta        `json:"peerDependenciesMeta,omitempty"`
+	BundleDependencies   json.RawMessage            `json:"bundleDependencies,omitempty"`
+	BundledDependencies  json.RawMessage            `json:"bundledDependencies,omitempty"`
+	Dist                 Dist                       `json:"dist"`
+	Engines              FlexMap                    `json:"engines,omitempty"`
+	OS                   []string                   `json:"os,omitempty"`
+	CPU                  []string                   `json:"cpu,omitempty"`
+	Scripts              map[string]json.RawMessage `json:"scripts,omitempty"`
+	Bin                  json.RawMessage            `json:"bin,omitempty"`
+	License              LicenseField               `json:"license,omitempty"`
+	Deprecated           FlexString                 `json:"deprecated,omitempty"`
+	Funding              json.RawMessage            `json:"funding,omitempty"`
 }
 
 // HasInstallScript returns true if the version has preinstall, install, or postinstall scripts.
