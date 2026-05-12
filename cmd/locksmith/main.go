@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +43,8 @@ func generateCmd() *cobra.Command {
 		nodeVersion     string
 		scopeRegistries []string
 		authTokens      []string
+		timeoutDuration time.Duration
+		verbose         bool
 	)
 
 	cmd := &cobra.Command{
@@ -109,19 +112,47 @@ func generateCmd() *cobra.Command {
 				opts.CutoffDate = &t
 			}
 
-			// Generate
+			// Generate with optional timeout. The deadline gives the resolver
+			// a budget to fall back on when a packument fetch wedges on a
+			// slow registry, instead of letting the process spin until an
+			// external killer (CI timeout, OOM, shell ^C) terminates it and
+			// leaves no output behind.
 			ctx := context.Background()
+			if timeoutDuration > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeoutDuration)
+				defer cancel()
+			}
+
+			stderr := cmd.ErrOrStderr()
+			var heartbeatStop chan struct{}
+			if verbose {
+				heartbeatStop = startHeartbeat(stderr, ctx, time.Now())
+				defer close(heartbeatStop)
+			}
+
 			result, err := locksmith.Generate(ctx, opts)
 			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr == context.DeadlineExceeded {
+					return fmt.Errorf("generate timed out after %s: %w", timeoutDuration, err)
+				}
 				return err
 			}
 
-			// Write output
+			// Write output. Atomic write to a temp file in the same directory
+			// followed by rename: a SIGKILL mid-write (CI timeout, OOM) leaves
+			// either nothing or a complete file, never a partial/zero-byte one.
 			if outputPath == "" || outputPath == "-" {
 				_, err = os.Stdout.Write(result.Lockfile)
 				return err
 			}
-			return os.WriteFile(outputPath, result.Lockfile, 0o644)
+			if err := atomicWriteFile(outputPath, result.Lockfile, 0o644); err != nil {
+				return fmt.Errorf("writing %s: %w", outputPath, err)
+			}
+			if verbose {
+				fmt.Fprintf(stderr, "locksmith: wrote %d bytes to %s\n", len(result.Lockfile), outputPath)
+			}
+			return nil
 		},
 	}
 
@@ -134,6 +165,8 @@ func generateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&nodeVersion, "node-version", "", "target Node.js version for engines.node filtering (e.g., 18.0.0)")
 	cmd.Flags().StringArrayVar(&scopeRegistries, "scope-registry", nil, "scope=url pairs for per-scope registry routing (e.g., @company=https://private.registry.com)")
 	cmd.Flags().StringArrayVar(&authTokens, "auth-token", nil, "url=token pairs for per-registry Bearer auth (e.g., https://private.registry.com=secrettoken)")
+	cmd.Flags().DurationVar(&timeoutDuration, "timeout", 0, "abort generation after this duration (e.g. 5m, 30s); 0 means no timeout")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "emit a heartbeat to stderr every 5s so long-running runs are observable")
 
 	_ = cmd.MarkFlagRequired("spec")
 	_ = cmd.MarkFlagRequired("format")
@@ -167,6 +200,75 @@ func validFormatsStr() string {
 		strs[i] = string(f)
 	}
 	return strings.Join(strs, ", ")
+}
+
+// atomicWriteFile writes data to a temp file in the same directory as path,
+// fsyncs it, and renames it over path. Either the destination doesn't exist
+// (we never got that far) or it contains the full payload - never the
+// half-written / zero-byte file os.WriteFile leaves behind when the process
+// is killed mid-write.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".locksmith-"+filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// Best-effort cleanup if anything below this point fails.
+	cleanup := func() { _ = os.Remove(tmpName) }
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
+}
+
+// startHeartbeat prints a single-line stderr update every 5s until the
+// returned channel is closed or the context is cancelled. Lets the operator
+// distinguish "locksmith is making progress" from "locksmith is wedged" on
+// large dependency trees that take minutes to resolve.
+func startHeartbeat(w io.Writer, ctx context.Context, start time.Time) chan struct{} {
+	return startHeartbeatEvery(w, ctx, start, 5*time.Second)
+}
+
+// startHeartbeatEvery is the testable variant that takes a tick interval.
+func startHeartbeatEvery(w io.Writer, ctx context.Context, start time.Time, interval time.Duration) chan struct{} {
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				fmt.Fprintf(w, "locksmith: still working (elapsed %s)\n", time.Since(start).Round(time.Second))
+			}
+		}
+	}()
+	return stop
 }
 
 // parseKeyValuePairs parses "key=value" strings into a map.
