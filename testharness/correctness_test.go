@@ -45,9 +45,9 @@ var noPeerAutoInstall = &ecosystem.ResolverPolicy{
 // pnpm8Policy matches pnpm 8 behavior: auto-install peers, but
 // ignoreMissing prevents auto-installation (changed in pnpm 9+).
 var pnpm8Policy = &ecosystem.ResolverPolicy{
-	CrossTreeDedup:              true,
-	AutoInstallPeers:            true,
-	SkipOptionalPeerDeps:        true,
+	CrossTreeDedup:               true,
+	AutoInstallPeers:             true,
+	SkipOptionalPeerDeps:         true,
 	IgnoreMissingPreventsInstall: true,
 }
 
@@ -162,8 +162,8 @@ func TestCorrectness(t *testing.T) {
 	// lockfile for the fixture, or where PM defaults differ from our config.
 	skipCombos := map[string]string{
 		// bun and pnpm@4-7 don't produce lockfiles for empty projects
-		"bun@1.2/zero-deps":      "bun deletes lockfile for empty projects",
-		"bun@1.3/zero-deps":      "bun deletes lockfile for empty projects",
+		"bun@1.2/zero-deps":     "bun deletes lockfile for empty projects",
+		"bun@1.3/zero-deps":     "bun deletes lockfile for empty projects",
 		"pnpm@4-v5.1/zero-deps": "pnpm@4 errors on empty projects",
 		"pnpm@5-v5.2/zero-deps": "pnpm@5 errors on empty projects",
 		"pnpm@6-v5.3/zero-deps": "pnpm@6 errors on empty projects",
@@ -172,10 +172,10 @@ func TestCorrectness(t *testing.T) {
 		// but locksmith includes them (no platform filter in correctness tests)
 		"npm@2-shrinkwrap/arborist-optional-missing": "npm@2 excludes platform-incompatible optional deps",
 		// yarn@2 can't resolve some newer packages
-		"yarn@2-v4/mixed-large":              "yarn@2 can't resolve some newer packages",
-		"yarn@2-v4/typescript-4":             "yarn@2 can't resolve typescript@4",
-		"yarn@2-v4/typescript-5":             "yarn@2 can't resolve typescript@5",
-		"yarn@2-v4/multiple-peer-providers":  "yarn@2 can't resolve newer packages",
+		"yarn@2-v4/mixed-large":             "yarn@2 can't resolve some newer packages",
+		"yarn@2-v4/typescript-4":            "yarn@2 can't resolve typescript@4",
+		"yarn@2-v4/typescript-5":            "yarn@2 can't resolve typescript@5",
+		"yarn@2-v4/multiple-peer-providers": "yarn@2 can't resolve newer packages",
 	}
 
 	// npm 2-4 shrinkwrap excludes devDependencies.
@@ -262,7 +262,6 @@ func TestCorrectness(t *testing.T) {
 	for _, pm := range []string{"npm@3-shrinkwrap", "npm@4-shrinkwrap"} {
 		skipCombos[pm+"/deep-chain"] = "npm 3-4 shrinkwrap crashes on webpack-sized dep trees"
 	}
-
 
 	for _, cc := range correctnessMatrix {
 		cc := cc
@@ -368,11 +367,13 @@ func compareResolution(t *testing.T, cc correctnessCase, fixture string) {
 	}
 	args = append(args, cc.GenCommand...)
 
-	cmd := exec.Command("docker", args...)
-	output, err := cmd.CombinedOutput()
+	output, err, attempts := runDockerWithNetworkRetry(args, 3)
 	if err != nil {
-		t.Fatalf("real %s failed to generate lockfile:\n%s\nerror: %v",
-			cc.PMLabel, string(output), err)
+		t.Fatalf("real %s failed to generate lockfile after %d attempt(s):\n%s\nerror: %v",
+			cc.PMLabel, attempts, string(output), err)
+	}
+	if attempts > 1 {
+		t.Logf("real %s generated lockfile after %d attempts (transient network errors retried)", cc.PMLabel, attempts)
 	}
 
 	realLockfile, err := os.ReadFile(filepath.Join(realDir, cc.RealLockFileName))

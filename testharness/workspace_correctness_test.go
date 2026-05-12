@@ -170,11 +170,13 @@ func compareWorkspaceResolution(t *testing.T, cc correctnessCase, fixture string
 	}
 	args = append(args, cc.GenCommand...)
 
-	cmd := exec.Command("docker", args...)
-	output, err := cmd.CombinedOutput()
+	output, err, attempts := runDockerWithNetworkRetry(args, 3)
 	if err != nil {
-		t.Fatalf("real %s failed to generate lockfile:\n%s\nerror: %v",
-			cc.PMLabel, string(output), err)
+		t.Fatalf("real %s failed to generate lockfile after %d attempt(s):\n%s\nerror: %v",
+			cc.PMLabel, attempts, string(output), err)
+	}
+	if attempts > 1 {
+		t.Logf("real %s generated lockfile after %d attempts (transient network errors retried)", cc.PMLabel, attempts)
 	}
 
 	realLockfile, err := os.ReadFile(filepath.Join(realDir, cc.RealLockFileName))
@@ -338,14 +340,19 @@ func runWorkspaceVerification(t *testing.T, vc verificationCase, fixture string)
 	}
 	args = append(args, vc.Command...)
 
-	cmd := exec.Command("docker", args...)
-	output, err := cmd.CombinedOutput()
+	output, err, attempts := runDockerWithNetworkRetry(args, 3)
 	if err != nil {
-		t.Fatalf("%s %s workspace verification failed for %s/%s:\n%s\nerror: %v",
-			vc.PMName, vc.PMVersion, vc.Format, fixture,
+		t.Fatalf("%s %s workspace verification failed for %s/%s after %d attempt(s):\n%s\nerror: %v",
+			vc.PMName, vc.PMVersion, vc.Format, fixture, attempts,
 			string(output), err)
 	}
-	t.Logf("%s %s workspace verified %s/%s: %s",
-		vc.PMName, vc.PMVersion, vc.Format, fixture,
-		strings.TrimSpace(string(output)))
+	if attempts > 1 {
+		t.Logf("%s %s workspace verified %s/%s after %d attempts (transient network errors retried): %s",
+			vc.PMName, vc.PMVersion, vc.Format, fixture, attempts,
+			strings.TrimSpace(string(output)))
+	} else {
+		t.Logf("%s %s workspace verified %s/%s: %s",
+			vc.PMName, vc.PMVersion, vc.Format, fixture,
+			strings.TrimSpace(string(output)))
+	}
 }

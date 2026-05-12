@@ -21,10 +21,10 @@ const dockerImage = "locksmith-test-runner"
 // that should be able to consume the generated lockfile.
 type verificationCase struct {
 	Format    locksmith.OutputFormat
-	FileName  string   // lockfile name to write
-	PMName    string   // package manager name for test naming
-	PMVersion string   // version string passed to helper script
-	Command   []string // docker command to run
+	FileName  string                         // lockfile name to write
+	PMName    string                         // package manager name for test naming
+	PMVersion string                         // version string passed to helper script
+	Command   []string                       // docker command to run
 	SetupFunc func(t *testing.T, dir string) // optional per-case setup
 }
 
@@ -175,7 +175,7 @@ func TestIntegration(t *testing.T) {
 						if vc.PMVersion == "3" || vc.PMVersion == "4" {
 							yarnV6V8Patches := map[string]bool{
 								"multiple-peer-providers": true,
-								"npm-6":                  true,
+								"npm-6":                   true,
 							}
 							if yarnV6V8Patches[fixture] {
 								t.Skip("yarn v6/v8 patches resolve and adds @types/* auto-types")
@@ -353,16 +353,21 @@ func runVerification(t *testing.T, vc verificationCase, fixture string) {
 	}
 	args = append(args, vc.Command...)
 
-	cmd := exec.Command("docker", args...)
-	output, err := cmd.CombinedOutput()
+	output, err, attempts := runDockerWithNetworkRetry(args, 3)
 	if err != nil {
-		t.Fatalf("%s %s verification failed for %s/%s:\n%s\nerror: %v",
-			vc.PMName, vc.PMVersion, vc.Format, fixture,
+		t.Fatalf("%s %s verification failed for %s/%s after %d attempt(s):\n%s\nerror: %v",
+			vc.PMName, vc.PMVersion, vc.Format, fixture, attempts,
 			string(output), err)
 	}
-	t.Logf("%s %s verified %s/%s: %s",
-		vc.PMName, vc.PMVersion, vc.Format, fixture,
-		strings.TrimSpace(string(output)))
+	if attempts > 1 {
+		t.Logf("%s %s verified %s/%s after %d attempts (transient network errors retried): %s",
+			vc.PMName, vc.PMVersion, vc.Format, fixture, attempts,
+			strings.TrimSpace(string(output)))
+	} else {
+		t.Logf("%s %s verified %s/%s: %s",
+			vc.PMName, vc.PMVersion, vc.Format, fixture,
+			strings.TrimSpace(string(output)))
+	}
 }
 
 // copyFixtureSubdirs copies subdirectories and extra root-level files from a

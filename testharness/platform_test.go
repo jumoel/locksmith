@@ -22,9 +22,9 @@ func TestPlatformFiltering(t *testing.T) {
 	specData := readFixture(t, "platform-specific")
 
 	for _, tc := range []struct {
-		name     string
-		format   locksmith.OutputFormat
-		checkFn  func(t *testing.T, lockfile []byte)
+		name    string
+		format  locksmith.OutputFormat
+		checkFn func(t *testing.T, lockfile []byte)
 	}{
 		{
 			name:   "npm-v3",
