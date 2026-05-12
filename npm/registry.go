@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"golang.org/x/sync/singleflight"
 )
 
 // RegistryClient fetches package metadata from the npm registry.
@@ -19,6 +20,7 @@ type RegistryClient struct {
 	httpClient      *http.Client
 	mu              sync.Mutex
 	cache           map[string]*Packument
+	sf              singleflight.Group
 	scopeRegistries map[string]string // "@scope" -> registry URL
 	authTokens      map[string]string // registry URL -> bearer token
 }
@@ -94,6 +96,11 @@ func (r *RegistryClient) registryForPackage(name string) string {
 }
 
 // fetchPackument fetches and caches the full packument for a package.
+//
+// Concurrent calls for the same name coalesce via singleflight: the first
+// caller performs the HTTP+parse work, every other caller blocks on the same
+// in-flight request and receives the shared result. Errors are not cached -
+// a subsequent retry after a transient failure will re-issue the request.
 func (r *RegistryClient) fetchPackument(ctx context.Context, name string) (*Packument, error) {
 	r.mu.Lock()
 	if p, ok := r.cache[name]; ok {
@@ -102,6 +109,34 @@ func (r *RegistryClient) fetchPackument(ctx context.Context, name string) (*Pack
 	}
 	r.mu.Unlock()
 
+	v, err, _ := r.sf.Do(name, func() (any, error) {
+		// Re-check the cache under singleflight in case a sibling won the race
+		// and populated it between the initial read and entering the flight.
+		r.mu.Lock()
+		if p, ok := r.cache[name]; ok {
+			r.mu.Unlock()
+			return p, nil
+		}
+		r.mu.Unlock()
+
+		p, err := r.doFetchPackument(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		r.mu.Lock()
+		r.cache[name] = p
+		r.mu.Unlock()
+		return p, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*Packument), nil
+}
+
+// doFetchPackument performs the actual HTTP fetch and JSON parse. Pulled out
+// so fetchPackument can wrap it in singleflight + cache management.
+func (r *RegistryClient) doFetchPackument(ctx context.Context, name string) (*Packument, error) {
 	registryURL := r.registryForPackage(name)
 	url := fmt.Sprintf("%s/%s", registryURL, name)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -137,11 +172,6 @@ func (r *RegistryClient) fetchPackument(ctx context.Context, name string) (*Pack
 	if err := json.Unmarshal(body, &p); err != nil {
 		return nil, fmt.Errorf("parsing packument for %s: %w", name, err)
 	}
-
-	r.mu.Lock()
-	r.cache[name] = &p
-	r.mu.Unlock()
-
 	return &p, nil
 }
 

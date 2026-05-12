@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -390,7 +391,7 @@ func TestRegistryForPackage_UnscopedPackage(t *testing.T) {
 
 func TestRegistryForPackage_MultipleScopes(t *testing.T) {
 	client := NewRegistryClientWithConfig("https://registry.npmjs.org", map[string]string{
-		"@company": "https://private.registry.com",
+		"@company":  "https://private.registry.com",
 		"@internal": "https://internal.registry.com",
 	}, nil)
 
@@ -579,5 +580,201 @@ func TestScopedPackage(t *testing.T) {
 	}
 	if dep, ok := meta.Dependencies["is-number"]; !ok || dep != "^6.0.0" {
 		t.Errorf("Dependencies[is-number] = %q, want %q", dep, "^6.0.0")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// singleflight tests
+// ---------------------------------------------------------------------------
+
+// TestSingleflight_ConcurrentFetchesCoalesce asserts that N goroutines calling
+// fetchPackument for the same name simultaneously result in exactly one HTTP
+// request. Without singleflight, every concurrent miss issues its own request
+// and the cache writes race to last-writer-wins.
+func TestSingleflight_ConcurrentFetchesCoalesce(t *testing.T) {
+	isOddData, err := os.ReadFile("testdata/packument-is-odd.json")
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+
+	var reqCount atomic.Int64
+	// release gate: every handler invocation blocks on this channel so all
+	// in-flight goroutines accumulate before any of them gets a response.
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount.Add(1)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(isOddData)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClient(srv.URL)
+
+	const N = 32
+	var wg sync.WaitGroup
+	results := make([]*Packument, N)
+	errs := make([]error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			p, err := client.fetchPackument(context.Background(), "is-odd")
+			results[idx] = p
+			errs[idx] = err
+		}(i)
+	}
+
+	// Wait until at least one handler invocation has entered, then release.
+	// 250ms is plenty for 32 goroutines to reach the singleflight gate on
+	// any reasonable machine; if singleflight is missing they'll all already
+	// be past the gate as separate in-flight requests.
+	time.Sleep(250 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := reqCount.Load(); got != 1 {
+		t.Errorf("expected exactly 1 HTTP request for %d concurrent fetches, got %d", N, got)
+	}
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d: unexpected error %v", i, err)
+		}
+	}
+	// All goroutines see the same cached pointer.
+	for i := 1; i < N; i++ {
+		if results[i] != results[0] {
+			t.Errorf("goroutine %d: result pointer differs from goroutine 0 (cache miss)", i)
+		}
+	}
+}
+
+// TestSingleflight_ErrorsNotCached asserts that a transient failure is not
+// persisted in the packument cache. A retry after error must re-issue the
+// HTTP request, because the next attempt might succeed against a registry
+// that just recovered from a 5xx storm.
+func TestSingleflight_ErrorsNotCached(t *testing.T) {
+	isOddData, err := os.ReadFile("testdata/packument-is-odd.json")
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+
+	var reqCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := reqCount.Add(1)
+		// Exhaust retries (maxRetries=3 plus the original = 4 attempts) for
+		// the first call, then succeed on attempt 5+.
+		if n <= 4 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(isOddData)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClient(srv.URL)
+
+	// First attempt should fail after exhausting retries.
+	_, err = client.fetchPackument(context.Background(), "is-odd")
+	if err == nil {
+		t.Fatal("expected error on first attempt, got nil")
+	}
+	if got := reqCount.Load(); got != 4 {
+		t.Fatalf("expected 4 HTTP attempts on first failure, got %d", got)
+	}
+
+	// A fresh attempt must re-issue requests (error not cached).
+	p, err := client.fetchPackument(context.Background(), "is-odd")
+	if err != nil {
+		t.Fatalf("expected success on second attempt, got %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected packument, got nil")
+	}
+	if got := reqCount.Load(); got < 5 {
+		t.Errorf("expected at least 5 HTTP attempts overall (4 fail + 1+ success), got %d", got)
+	}
+}
+
+// TestSingleflight_NotFoundNotCached asserts that 404 responses don't poison
+// the cache either - a name that wasn't on the registry might appear later
+// (e.g. a new scoped package). errors.Is is overkill; we just check that the
+// retry path exercises a fresh request.
+func TestSingleflight_NotFoundNotCached(t *testing.T) {
+	isOddData, err := os.ReadFile("testdata/packument-is-odd.json")
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+
+	var reqCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := reqCount.Add(1)
+		if n == 1 {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(isOddData)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClient(srv.URL)
+
+	_, err = client.fetchPackument(context.Background(), "is-odd")
+	if err == nil {
+		t.Fatal("expected 404 error on first attempt")
+	}
+
+	// Retry: must hit the server again, must succeed.
+	_, err = client.fetchPackument(context.Background(), "is-odd")
+	if err != nil {
+		t.Errorf("expected second attempt to succeed, got %v", err)
+	}
+	if got := reqCount.Load(); got != 2 {
+		t.Errorf("expected 2 HTTP requests (1 not-found + 1 success), got %d", got)
+	}
+}
+
+// TestSingleflight_ConcurrentFetchesShareError covers the "all callers see the
+// same error" branch: when the in-flight leader fails, every waiter gets the
+// same error value and no caller gets to silently observe a cached partial.
+func TestSingleflight_ConcurrentFetchesShareError(t *testing.T) {
+	var reqCount atomic.Int64
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount.Add(1)
+		<-release
+		// Server will exhaust retries.
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClient(srv.URL)
+
+	const N = 8
+	var wg sync.WaitGroup
+	errs := make([]error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, errs[idx] = client.fetchPackument(context.Background(), "is-odd")
+		}(i)
+	}
+	// Let goroutines reach singleflight.
+	time.Sleep(250 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err == nil {
+			t.Errorf("goroutine %d: expected error, got nil", i)
+		}
+	}
+	// Retry budget is maxRetries=3 plus initial = 4 HTTP attempts, all from
+	// the singleflight leader. Waiters share the same error.
+	if got := reqCount.Load(); got > 4 {
+		t.Errorf("expected at most 4 HTTP requests under singleflight, got %d", got)
 	}
 }
