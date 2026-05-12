@@ -601,9 +601,17 @@ func writeEntryBody(b *strings.Builder, pkg *ResolvedPackage, constraintKey stri
 		cleanURL = "https://github.com/" + cleanURL
 		cleanURL = strings.Replace(cleanURL, "#", "#commit=", 1)
 		b.WriteString(fmt.Sprintf("  resolution: \"%s@%s\"\n", depName, cleanURL))
-	} else if strings.HasPrefix(url, "file:") {
-		// file: dep: use portal: protocol with locator suffix.
-		path := strings.TrimPrefix(url, "file:")
+	} else if strings.HasPrefix(url, "file:") || strings.HasPrefix(url, "portal:") {
+		// file: / portal: deps both resolve to a local path; emit them as a
+		// portal: resolution with a locator suffix pointing back at the root
+		// workspace. Yarn berry uses this form whether the user wrote
+		// `"foo": "file:./foo"` or `"foo": "portal:./foo"` in package.json.
+		var path string
+		if strings.HasPrefix(url, "file:") {
+			path = strings.TrimPrefix(url, "file:")
+		} else {
+			path = strings.TrimPrefix(url, "portal:")
+		}
 		locator := strings.NewReplacer("@", "%40", ":", "%3A").Replace(cfg.ProjectName) + "%40workspace%3A."
 		b.WriteString(fmt.Sprintf("  resolution: \"%s@portal:%s::locator=%s\"\n", depName, path, locator))
 		linkType = "soft"

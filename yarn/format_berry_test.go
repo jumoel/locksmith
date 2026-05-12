@@ -929,3 +929,97 @@ func TestBerryCacheKeyWithCompressionLevel(t *testing.T) {
 		})
 	}
 }
+
+// TestBerryPortalDepEntry covers projects that declare a dep via yarn berry's
+// portal: protocol (e.g. `"foo": "portal:./foo"`). Storybook's monorepo uses
+// this for eslint-plugin-local-rules. The committed lockfile contains:
+//
+//	"eslint-plugin-local-rules@portal:./eslint-plugin-local-rules":
+//	  resolution: "eslint-plugin-local-rules@portal:./eslint-plugin-local-rules::locator=..."
+//	  linkType: soft
+//
+// Before this case was fixed the berry formatter emitted the resolution as
+// `<name>@npm:0.0.0-local`, sending yarn to the registry for a package that
+// does not exist there.
+func TestBerryPortalDepEntry(t *testing.T) {
+	localNode := &ecosystem.Node{
+		Name:       "local-pkg",
+		Version:    "0.0.0-local",
+		TarballURL: "portal:./local-pkg",
+	}
+
+	graph := &ecosystem.Graph{
+		Root: &ecosystem.Node{
+			Name:    "test-project",
+			Version: "1.0.0",
+			Dependencies: []*ecosystem.Edge{
+				{
+					Name:       "local-pkg",
+					Constraint: "portal:./local-pkg",
+					Target:     localNode,
+					Type:       ecosystem.DepRegular,
+				},
+			},
+		},
+		Nodes: map[string]*ecosystem.Node{
+			"local-pkg@portal:./local-pkg": localNode,
+		},
+	}
+
+	result := &ResolveResult{
+		Graph: graph,
+		Packages: map[string]*ResolvedPackage{
+			"local-pkg@portal:./local-pkg": {
+				Node:         localNode,
+				Dependencies: map[string]string{},
+			},
+		},
+	}
+
+	project := &ecosystem.ProjectSpec{
+		Name:    "test-project",
+		Version: "1.0.0",
+		Dependencies: []ecosystem.DeclaredDep{
+			{Name: "local-pkg", Constraint: "portal:./local-pkg", Type: ecosystem.DepRegular},
+		},
+	}
+
+	for name, formatter := range map[string]interface {
+		FormatFromResult(*ResolveResult, *ecosystem.ProjectSpec) ([]byte, error)
+	}{
+		"v6": NewYarnBerryV6Formatter(),
+		"v8": NewYarnBerryV8Formatter(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := formatter.FormatFromResult(result, project)
+			if err != nil {
+				t.Fatalf("FormatFromResult failed: %v", err)
+			}
+			output := string(data)
+
+			if !strings.Contains(output, `"local-pkg@portal:./local-pkg"`) {
+				t.Errorf("missing portal: constraint key in output:\n%s", output)
+			}
+
+			expectedRes := `"local-pkg@portal:./local-pkg::locator=test-project%40workspace%3A."`
+			if !strings.Contains(output, expectedRes) {
+				t.Errorf("expected portal: resolution %s, got:\n%s", expectedRes, output)
+			}
+
+			// Must not appear as an npm registry resolution.
+			if strings.Contains(output, `"local-pkg@npm:0.0.0-local"`) {
+				t.Errorf("portal dep should not be emitted as npm: resolution, got:\n%s", output)
+			}
+
+			// linkType must be soft for portal: deps (same as file:).
+			entryIdx := strings.Index(output, `"local-pkg@portal:./local-pkg"`)
+			if entryIdx == -1 {
+				t.Fatal("portal dep entry not found")
+			}
+			entrySection := output[entryIdx:]
+			if !strings.Contains(entrySection[:200], "linkType: soft") {
+				t.Errorf("portal dep should be soft-linked, got:\n%s", entrySection[:200])
+			}
+		})
+	}
+}
