@@ -101,14 +101,20 @@ type resolverState struct {
 	policy            ResolverPolicy
 	specDir           string // for resolving file: deps
 	workspaceIndex    *WorkspaceIndex
-	overrides         *OverrideSet         // version overrides from package.json
-	packageExtensions *PackageExtensionSet // pnpm packageExtensions
-	peerDepRules      *PeerDependencyRules // pnpm peerDependencyRules
+	overrides         *OverrideSet                 // version overrides from package.json
+	packageExtensions *PackageExtensionSet         // pnpm packageExtensions
+	peerDepRules      *PeerDependencyRules         // pnpm peerDependencyRules
 	catalogs          map[string]map[string]string // pnpm catalogs
 	patchedDeps       map[string]string            // pnpm patchedDependencies
 	ancestry          []string                     // current resolution chain for override matching
 	nodeVersion       *semver.Version              // target Node.js version for engines filtering
+	prefetcher        *prefetcher                  // speculative packument warmer; nil when disabled
 }
+
+// PrefetchWorkers controls how many goroutines are used to speculatively
+// warm the packument cache ahead of the serial resolver. Set to 0 to
+// disable. Reads happen at Resolve entry; concurrent mutation is unsafe.
+var PrefetchWorkers = 8
 
 // Resolve executes the shared dependency resolution algorithm.
 // PM-specific data is collected via the policy.OnNodeResolved callback.
@@ -139,11 +145,22 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 		catalogs:          project.Catalogs,
 		patchedDeps:       project.PatchedDependencies,
 		nodeVersion:       nodeVer,
+		prefetcher:        newPrefetcher(ctx, registry, opts.CutoffDate, PrefetchWorkers, 0),
 	}
+	defer state.prefetcher.Wait()
 
 	for _, dep := range project.Dependencies {
 		state.projectDeps[dep.Name] = true
 	}
+
+	// Warm the cache for direct project deps before the serial walk starts.
+	rootNames := make([]string, 0, len(project.Dependencies))
+	for _, dep := range project.Dependencies {
+		if !isNonRegistrySpecifier(dep.Constraint) {
+			rootNames = append(rootNames, dep.Name)
+		}
+	}
+	state.prefetcher.SubmitMany(rootNames)
 
 	graph := &Graph{
 		Root:  &Node{Name: project.Name, Version: project.Version},
@@ -461,6 +478,32 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 
 	// Apply packageExtensions to inject additional deps before building the node.
 	s.packageExtensions.Apply(meta)
+
+	// Speculatively warm the cache for transitive deps before we recurse.
+	// Singleflight in the registry client guarantees that an in-flight
+	// prefetch and a later resolver fetch for the same name share one
+	// request. Cheap on cache hits, big wins on first-touch packages.
+	if s.prefetcher != nil {
+		batch := make([]string, 0, len(meta.Dependencies)+len(meta.OptionalDeps)+len(meta.PeerDeps))
+		for name, constraint := range meta.Dependencies {
+			if !isNonRegistrySpecifier(constraint) {
+				batch = append(batch, name)
+			}
+		}
+		for name, constraint := range meta.OptionalDeps {
+			if !isNonRegistrySpecifier(constraint) {
+				batch = append(batch, name)
+			}
+		}
+		if s.policy.AutoInstallPeers {
+			for name, constraint := range meta.PeerDeps {
+				if !isNonRegistrySpecifier(constraint) {
+					batch = append(batch, name)
+				}
+			}
+		}
+		s.prefetcher.SubmitMany(batch)
+	}
 
 	node := &Node{
 		Name:             meta.Name,
@@ -827,11 +870,11 @@ func readLocalPackageVersion(specDir, relPath string) string {
 
 func isNonRegistrySpecifier(constraint string) bool {
 	nonRegistryPrefixes := []string{
-		"file:", "link:", "portal:",       // local filesystem
-		"git+", "git://", "git@",         // git URLs
+		"file:", "link:", "portal:", // local filesystem
+		"git+", "git://", "git@", // git URLs
 		"github:", "bitbucket:", "gitlab:", // shorthand git hosts
-		"patch:", "exec:",                 // pnpm extensions
-		"http://", "https://",            // tarball URLs
+		"patch:", "exec:", // pnpm extensions
+		"http://", "https://", // tarball URLs
 	}
 	for _, p := range nonRegistryPrefixes {
 		if strings.HasPrefix(constraint, p) {
