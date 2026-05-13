@@ -315,6 +315,16 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 			} else {
 				versionValue = tarballURL
 			}
+		} else if strings.HasPrefix(tarballURL, "link:") {
+			// link: deps mirror file:: importer version is the URL form
+			// pnpm itself emits ("link:./path"). The placeholder
+			// "0.0.0-local" would make pnpm look up the dep as a registry
+			// package on install.
+			versionValue = tarballURL
+		} else if strings.HasPrefix(tarballURL, "portal:") {
+			// portal: is yarn-specific but the same shape works in pnpm
+			// lockfiles when present.
+			versionValue = tarballURL
 		} else if strings.HasPrefix(tarballURL, "git+") || strings.HasPrefix(constraint, "github:") {
 			// git deps: v6 uses github.com/owner/repo/hash, v9 uses name@git+url#hash.
 			if useV6Key {
@@ -356,15 +366,32 @@ func buildImporterDeps(deps map[string]string, result *ResolveResult, skipUnreso
 }
 
 // pnpmPackageKey returns the pnpm v9 packages section key (no patch suffix).
+//
+// Registry deps key as "name@version". Non-registry deps (file:, link:,
+// portal:, git+, github:, http(s):) key as "name@<url>" because the
+// placeholder Version on those nodes ("0.0.0-local") doesn't disambiguate
+// and pnpm install would try to fetch a non-existent `<name>-0.0.0-local.tgz`
+// from the registry.
 func pnpmPackageKey(pkg *ResolvedPackage) string {
 	url := pkg.Node.TarballURL
-	if strings.HasPrefix(url, "git+") {
-		return pkg.Node.Name + "@" + url
-	}
-	if strings.HasPrefix(url, "file:") {
+	if isNonRegistryURL(url) {
 		return pkg.Node.Name + "@" + url
 	}
 	return pkg.Node.Name + "@" + pkg.Node.Version
+}
+
+// isNonRegistryURL returns true if TarballURL is a non-registry protocol
+// for which the resolver stores a placeholder Version on the node. pnpm's
+// lockfile keys these deps by the URL itself rather than by version.
+//
+// git+ covers github: deps too: the resolver rewrites `github:owner/repo`
+// to a `git+ssh://...` URL before storing it on the node, so a single
+// `git+` prefix check catches both forms.
+func isNonRegistryURL(url string) bool {
+	return strings.HasPrefix(url, "file:") ||
+		strings.HasPrefix(url, "link:") ||
+		strings.HasPrefix(url, "portal:") ||
+		strings.HasPrefix(url, "git+")
 }
 
 // pnpmSnapshotKey returns the pnpm v9 snapshots section key.
@@ -414,9 +441,15 @@ func buildPackages(result *ResolveResult, wsNames map[string]bool) *yaml.Node {
 			addMapping(resolution, "type", scalarNode("git", 0))
 			addMapping(pkgNode, "resolution", resolution)
 			addMapping(pkgNode, "version", scalarNode(pkg.Node.Version, 0))
-		} else if strings.HasPrefix(url, "file:") {
-			// File dep: {directory: path, type: directory}
-			path := strings.TrimPrefix(url, "file:")
+		} else if strings.HasPrefix(url, "file:") || strings.HasPrefix(url, "link:") || strings.HasPrefix(url, "portal:") {
+			// Local-filesystem deps (file:, link:, portal:) share the same
+			// pnpm packages-entry shape: {directory: <path>, type: directory}.
+			// link: is a symlink, file: is a copy, portal: is yarn-specific
+			// but follows the same lockfile form when present.
+			path := url
+			path = strings.TrimPrefix(path, "file:")
+			path = strings.TrimPrefix(path, "link:")
+			path = strings.TrimPrefix(path, "portal:")
 			addMapping(resolution, "directory", scalarNode(path, 0))
 			addMapping(resolution, "type", scalarNode("directory", 0))
 			addMapping(pkgNode, "resolution", resolution)
@@ -502,13 +535,25 @@ func addMapping(mapping *yaml.Node, key string, value *yaml.Node) {
 
 // computeDevFlags walks root edges to determine which packages are dev-only.
 // A package is dev-only if it is only reachable through devDependency edges
-// from the root. Returns a set of "name@version" keys that are dev-only.
+// from the root. Returns a set of result.Packages keys that are dev-only.
+//
+// The walk identifies nodes by pointer and maps them back to result.Packages
+// keys via a reverse index. A name+version-keyed walk would miss
+// non-registry deps (file:, link:, portal:, git+, http(s):), which the
+// resolver stores in result.Packages as "name@constraint" with a placeholder
+// version like 0.0.0-local. A dev-only file: dep would have ended up with
+// dev: false in the v5/v6 lockfile under that scheme.
 func computeDevFlags(result *ResolveResult, project *ecosystem.ProjectSpec) map[string]bool {
 	devOnly := make(map[string]bool)
 	nonDev := make(map[string]bool)
 
 	if result.Graph == nil || result.Graph.Root == nil {
 		return devOnly
+	}
+
+	nodeKeys := make(map[*ecosystem.Node]string, len(result.Packages))
+	for key, pkg := range result.Packages {
+		nodeKeys[pkg.Node] = key
 	}
 
 	// Walk from each root edge. If it's a dev edge, mark reachable packages
@@ -518,7 +563,7 @@ func computeDevFlags(result *ResolveResult, project *ecosystem.ProjectSpec) map[
 			continue
 		}
 		isDev := edge.Type == ecosystem.DepDev
-		walkDeps(edge.Target, isDev, devOnly, nonDev, make(map[string]bool))
+		walkDeps(edge.Target, isDev, devOnly, nonDev, make(map[*ecosystem.Node]bool), nodeKeys)
 	}
 
 	// A package is dev-only if it was reached via dev edges and never via non-dev edges.
@@ -531,23 +576,28 @@ func computeDevFlags(result *ResolveResult, project *ecosystem.ProjectSpec) map[
 	return result2
 }
 
-// walkDeps recursively marks packages as dev or non-dev reachable.
-func walkDeps(node *ecosystem.Node, isDev bool, devSet, nonDevSet map[string]bool, visited map[string]bool) {
-	key := node.Name + "@" + node.Version
-	if visited[key] {
+// walkDeps recursively marks packages as dev or non-dev reachable. Visited
+// tracking is by node pointer so that dev/non-dev sets are keyed exactly the
+// way result.Packages is, including the "name@constraint" form for
+// non-registry deps. Nodes that aren't in result.Packages (workspace
+// members) are walked through but not added to the sets.
+func walkDeps(node *ecosystem.Node, isDev bool, devSet, nonDevSet map[string]bool, visited map[*ecosystem.Node]bool, nodeKeys map[*ecosystem.Node]string) {
+	if visited[node] {
 		return
 	}
-	visited[key] = true
+	visited[node] = true
 
-	if isDev {
-		devSet[key] = true
-	} else {
-		nonDevSet[key] = true
+	if key, ok := nodeKeys[node]; ok {
+		if isDev {
+			devSet[key] = true
+		} else {
+			nonDevSet[key] = true
+		}
 	}
 
 	for _, edge := range node.Dependencies {
 		if edge.Target != nil {
-			walkDeps(edge.Target, isDev, devSet, nonDevSet, visited)
+			walkDeps(edge.Target, isDev, devSet, nonDevSet, visited, nodeKeys)
 		}
 	}
 }

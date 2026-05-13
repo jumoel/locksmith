@@ -472,6 +472,232 @@ func TestGenerate_PortalWithPlatformFilter(t *testing.T) {
 	}
 }
 
+// TestGenerate_PortalAtWorkspaceMember regresses the same shape as
+// TestGenerate_PortalWithPlatformFilter but for a portal dep declared by a
+// workspace member, not the root. buildConstraintMap's workspace-member
+// loop also synthesizes targetKey as `Name + "@" + Version` and would skip
+// emitting the entry for the member's non-registry deps.
+func TestGenerate_PortalAtWorkspaceMember(t *testing.T) {
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	// Workspace root with one member.
+	if err := os.MkdirAll(filepath.Join(dir, "packages", "lib"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "packages", "lib", "local-helper"), 0o755); err != nil {
+		t.Fatalf("mkdir local-helper: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "packages", "lib", "local-helper", "package.json"),
+		[]byte(`{"name":"local-helper","version":"0.0.0-local"}`), 0o644); err != nil {
+		t.Fatalf("writing helper manifest: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "packages", "lib", "package.json"),
+		[]byte(`{"name":"member-lib","version":"1.0.0","dependencies":{"local-helper":"portal:./local-helper"}}`), 0o644); err != nil {
+		t.Fatalf("writing member manifest: %v", err)
+	}
+	rootSpec := []byte(`{
+  "name": "ws-root",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["packages/*"]
+}`)
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), rootSpec, 0o644); err != nil {
+		t.Fatalf("writing root manifest: %v", err)
+	}
+
+	members := map[string][]byte{
+		"packages/lib": []byte(`{"name":"member-lib","version":"1.0.0","dependencies":{"local-helper":"portal:./local-helper"}}`),
+	}
+
+	result, err := Generate(context.Background(), GenerateOptions{
+		SpecFile:         rootSpec,
+		SpecDir:          dir,
+		OutputFormat:     FormatYarnBerryV8,
+		RegistryURL:      srv.URL,
+		WorkspaceMembers: members,
+	})
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	out := string(result.Lockfile)
+	wantKey := `"local-helper@portal:`
+	if !strings.Contains(out, wantKey) {
+		t.Errorf("expected workspace member's portal dep to appear in lockfile, got:\n%s", out)
+	}
+}
+
+// TestGenerate_PnpmLinkDep verifies that the pnpm formatter emits a usable
+// lockfile entry key for a `link:` dep. pnpmPackageKey handles git+ and
+// file: but falls back to "name@version" for link:, which produces a
+// placeholder-versioned key like "local-pkg@0.0.0-local". pnpm install
+// against that key tries to fetch `local-pkg-0.0.0-local.tgz` from the
+// registry and 404s.
+//
+// Verified end-to-end against pnpm v9: with the locksmith-shaped output
+// `local-pkg@link:./local-pkg`, pnpm install --frozen-lockfile succeeds
+// and symlinks the local directory.
+func TestGenerate_PnpmLinkDep(t *testing.T) {
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "local-pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "local-pkg", "package.json"),
+		[]byte(`{"name":"local-pkg","version":"1.2.3"}`), 0o644); err != nil {
+		t.Fatalf("writing local manifest: %v", err)
+	}
+	spec := []byte(`{
+  "name": "test-pnpm-link",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "local-pkg": "link:./local-pkg"
+  }
+}`)
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), spec, 0o644); err != nil {
+		t.Fatalf("writing spec: %v", err)
+	}
+
+	result, err := Generate(context.Background(), GenerateOptions{
+		SpecFile:     spec,
+		SpecDir:      dir,
+		OutputFormat: FormatPnpmLockV9,
+		RegistryURL:  srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	out := string(result.Lockfile)
+	// pnpm v9 packages section key. yaml library may or may not quote it,
+	// so check the bare form.
+	wantKey := "local-pkg@link:./local-pkg:"
+	if !strings.Contains(out, wantKey) {
+		t.Errorf("expected pnpm lockfile entry keyed %q, got:\n%s", wantKey, out)
+	}
+	// Importer should record the link: form as the version, not the
+	// placeholder 0.0.0-local.
+	wantImporterVersion := "version: link:./local-pkg"
+	if !strings.Contains(out, wantImporterVersion) {
+		t.Errorf("expected importer version %q, got:\n%s", wantImporterVersion, out)
+	}
+}
+
+// TestNonRegistryDepsNotPlatformFiltered documents and locks in the invariant
+// that locksmith never platform-filters non-registry deps. The platform
+// filter, architecture filter, npm PlacedNodes cleanup, and bun peer-only
+// sweep all assume `name@version` keys; they would mishandle a non-registry
+// dep that got filtered, but only if such a dep gets filtered in the first
+// place. The resolver does not propagate `os` / `cpu` metadata to nodes
+// created from portal:/file:/link:/github: constraints (it only sets Name,
+// Version, TarballURL), so NodeMatchesPlatform always returns true for
+// them and they survive every filter. This test catches a future change
+// that would start populating OS metadata for non-registry deps without
+// updating the downstream cleanup helpers.
+func TestNonRegistryDepsNotPlatformFiltered(t *testing.T) {
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "darwin-only-helper"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Local manifest declares os: ["darwin"], but the resolver doesn't
+	// propagate this for portal: deps.
+	if err := os.WriteFile(filepath.Join(dir, "darwin-only-helper", "package.json"),
+		[]byte(`{"name":"darwin-only-helper","version":"0.0.0-local","os":["darwin"]}`), 0o644); err != nil {
+		t.Fatalf("writing local manifest: %v", err)
+	}
+	spec := []byte(`{
+  "name": "test-non-reg-os",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "darwin-only-helper": "portal:./darwin-only-helper"
+  }
+}`)
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), spec, 0o644); err != nil {
+		t.Fatalf("writing spec: %v", err)
+	}
+
+	result, err := Generate(context.Background(), GenerateOptions{
+		SpecFile:     spec,
+		SpecDir:      dir,
+		OutputFormat: FormatYarnBerryV8,
+		RegistryURL:  srv.URL,
+		Platform:     "linux/x64", // would filter the portal dep if OS metadata was propagated
+	})
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	out := string(result.Lockfile)
+	if !strings.Contains(out, `"darwin-only-helper@portal:`) {
+		t.Errorf("portal dep should survive platform filtering on linux/x64 "+
+			"(resolver does not propagate os field for non-registry deps); got:\n%s", out)
+	}
+}
+
+// TestGenerate_PnpmV6DevFlagForNonRegistryDep regresses the walkDeps
+// inconsistency. pnpm's v5/v6 lockfile encodes "this package is dev-only"
+// as `dev: true` on the package entry. computeDevFlags walks the graph
+// and stores reached nodes under `Name + "@" + Version`, but the format
+// loop looks them up under the `result.Packages` key, which is
+// `name@constraint` for non-registry deps. The mismatch caused dev-only
+// non-registry deps to be flagged `dev: false` in the lockfile.
+func TestGenerate_PnpmV6DevFlagForNonRegistryDep(t *testing.T) {
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "local-pkg"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "local-pkg", "package.json"),
+		[]byte(`{"name":"local-pkg","version":"1.0.0"}`), 0o644); err != nil {
+		t.Fatalf("writing local manifest: %v", err)
+	}
+	spec := []byte(`{
+  "name": "test-dev-file",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "local-pkg": "file:./local-pkg"
+  }
+}`)
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), spec, 0o644); err != nil {
+		t.Fatalf("writing spec: %v", err)
+	}
+
+	result, err := Generate(context.Background(), GenerateOptions{
+		SpecFile:     spec,
+		SpecDir:      dir,
+		OutputFormat: FormatPnpmLockV6,
+		RegistryURL:  srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	out := string(result.Lockfile)
+	if !strings.Contains(out, "dev: true") {
+		t.Errorf("expected dev: true on the dev-only file: dep, got:\n%s", out)
+	}
+	if strings.Contains(out, "dev: false") {
+		t.Errorf("dev: false should not appear for a dev-only dep, got:\n%s", out)
+	}
+}
+
 func TestGenerate_MockServer(t *testing.T) {
 	// Load the real is-odd packument fixture.
 	isOddData, err := os.ReadFile("npm/testdata/packument-is-odd.json")
