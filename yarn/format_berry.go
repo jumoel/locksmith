@@ -403,38 +403,7 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 			if strings.HasPrefix(edge.Constraint, "workspace:") {
 				continue
 			}
-			// Compute targetKey to match the Packages map key.
-			// The resolve engine stores non-registry deps under
-			// "actualName@constraint" where actualName is the resolved package
-			// name (not the dep alias). Tarball URL deps that resolved to a
-			// real npm package are stored under "name@version".
-			constraint := edge.Constraint
-			var targetKey string
-			if isNonRegistryBerryConstraint(constraint) {
-				if isNpmRegistryURL(constraint) {
-					// Tarball URL pointing at a known registry: the resolve engine
-					// resolved it to a real npm package stored under name@version.
-					targetKey = edge.Target.Name + "@" + edge.Target.Version
-				} else {
-					// Git, file, or other non-registry dep: stored under
-					// actualName@constraint (actualName may differ from edge.Name
-					// when the dep is aliased, e.g. "git-pkg" -> "is-odd").
-					targetKey = edge.Target.Name + "@" + constraint
-				}
-			} else {
-				targetKey = edge.Target.Name + "@" + edge.Target.Version
-			}
-			// Don't add npm: prefix for non-registry constraints.
-			if strings.HasPrefix(constraint, "npm:") {
-				descriptor := fmt.Sprintf("%s@%s", edge.Name, constraint)
-				m[targetKey] = appendUnique(m[targetKey], descriptor)
-			} else if isNonRegistryBerryConstraint(constraint) {
-				descriptor := fmt.Sprintf("%s@%s", edge.Name, constraint)
-				m[targetKey] = appendUnique(m[targetKey], descriptor)
-			} else {
-				descriptor := fmt.Sprintf("%s@npm:%s", edge.Name, constraint)
-				m[targetKey] = appendUnique(m[targetKey], descriptor)
-			}
+			addBerryEdgeConstraint(m, edge)
 		}
 
 		// Constraints from workspace member dependencies.
@@ -452,9 +421,7 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 				if wsNames[depEdge.Target.Name] {
 					continue
 				}
-				targetKey := depEdge.Target.Name + "@" + depEdge.Target.Version
-				descriptor := fmt.Sprintf("%s@npm:%s", depEdge.Name, depEdge.Constraint)
-				m[targetKey] = appendUnique(m[targetKey], descriptor)
+				addBerryEdgeConstraint(m, depEdge)
 			}
 		}
 	}
@@ -465,9 +432,7 @@ func buildConstraintMap(result *ResolveResult, project *ecosystem.ProjectSpec) m
 			if edge.Target == nil {
 				continue
 			}
-			targetKey := edge.Target.Name + "@" + edge.Target.Version
-			descriptor := fmt.Sprintf("%s@npm:%s", edge.Name, edge.Constraint)
-			m[targetKey] = appendUnique(m[targetKey], descriptor)
+			addBerryEdgeConstraint(m, edge)
 		}
 	}
 
@@ -712,6 +677,46 @@ func integrityToYarnChecksum(integrity string, prefix string) string {
 	}
 
 	return prefix + hex.EncodeToString(decoded)
+}
+
+// addBerryEdgeConstraint records a constraint for an edge's target package in
+// the constraint map. The targetKey is computed to match how the resolver
+// stored the target in result.Packages: registry deps live under "name@version",
+// non-registry deps (file:, portal:, link:, git+, github:, http(s):, patch:,
+// exec:) live under "name@constraint" with a placeholder version. Without
+// this distinction, a non-registry edge's constraint silently fails to attach
+// to its package entry and the formatter skips the entry as constraint-less.
+//
+// Used by all three constraint-collection loops in buildConstraintMap (root,
+// workspace member, transitive) so they handle non-registry deps consistently.
+func addBerryEdgeConstraint(m map[string][]string, edge *ecosystem.Edge) {
+	constraint := edge.Constraint
+	var targetKey string
+	if isNonRegistryBerryConstraint(constraint) {
+		if isNpmRegistryURL(constraint) {
+			// Tarball URL pointing at a known registry: the resolve engine
+			// resolved it to a real npm package stored under name@version.
+			targetKey = edge.Target.Name + "@" + edge.Target.Version
+		} else {
+			// Git, file, portal, link, github, http(s), patch, or exec: the
+			// resolver keys these under "actualName@constraint" (note that
+			// actualName may differ from edge.Name for aliased deps such as
+			// "git-pkg" -> "is-odd").
+			targetKey = edge.Target.Name + "@" + constraint
+		}
+	} else {
+		targetKey = edge.Target.Name + "@" + edge.Target.Version
+	}
+
+	var descriptor string
+	if strings.HasPrefix(constraint, "npm:") || isNonRegistryBerryConstraint(constraint) {
+		// npm aliases and non-registry constraints are written verbatim.
+		descriptor = fmt.Sprintf("%s@%s", edge.Name, constraint)
+	} else {
+		// Plain semver gets the npm: prefix yarn berry uses for registry deps.
+		descriptor = fmt.Sprintf("%s@npm:%s", edge.Name, constraint)
+	}
+	m[targetKey] = appendUnique(m[targetKey], descriptor)
 }
 
 // isNpmRegistryURL returns true if the URL is a standard npm registry tarball URL.
