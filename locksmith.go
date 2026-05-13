@@ -77,32 +77,32 @@ func isZeroArchitectures(a ecosystem.Architectures) bool {
 // unreachableKeys returns package keys that are not reachable from the graph
 // root. After platform filtering removes a parent node, its platform-agnostic
 // transitive deps may remain in the packages map despite being orphaned.
+//
+// The walk identifies nodes by pointer rather than by reconstructing
+// "name@version" from edge targets. Non-registry deps (portal:, file:,
+// link:, git+, etc.) are stored in result.Packages under "name@constraint"
+// with a placeholder version like "0.0.0-local"; a name+version key would
+// miss them and they would be wrongly marked orphaned.
 func unreachableKeys(graph *ecosystem.Graph, packageKeys map[string]bool) map[string]bool {
 	if graph == nil || graph.Root == nil {
 		return nil
 	}
-	reachable := make(map[string]bool)
+	reachable := make(map[*ecosystem.Node]bool)
 	var walk func(node *ecosystem.Node)
 	walk = func(node *ecosystem.Node) {
-		if node == nil {
+		if node == nil || reachable[node] {
 			return
 		}
+		reachable[node] = true
 		for _, edge := range node.Dependencies {
-			if edge.Target == nil {
-				continue
-			}
-			key := edge.Target.Name + "@" + edge.Target.Version
-			if reachable[key] {
-				continue
-			}
-			reachable[key] = true
 			walk(edge.Target)
 		}
 	}
 	walk(graph.Root)
 	orphaned := make(map[string]bool)
 	for key := range packageKeys {
-		if !reachable[key] {
+		node := graph.Nodes[key]
+		if node == nil || !reachable[node] {
 			orphaned[key] = true
 		}
 	}
