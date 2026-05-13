@@ -43,14 +43,22 @@ may not match what a specific PM version expects.
 Yarn berry (v2+) applies internal compatibility patches to certain packages
 (notably TypeScript) via the `patch:` protocol. These patches are specific to
 each yarn version and maintained in yarn's built-in plugin database. Locksmith
-cannot generate these patch entries because they require knowledge of yarn's
-internal patch registry.
+cannot generate these patch entries with correct hashes because they require
+knowledge of yarn's internal patch registry.
 
 The generated lockfile is missing entries like:
 ```
 "typescript@patch:typescript@^5.0.0#~builtin<compat/typescript>":
   resolution: "typescript@patch:typescript@npm%3A5.9.3#~builtin<compat/typescript>::version=5.9.3&hash=5786d5"
 ```
+
+Downstream consumers can sidestep this by disabling plugin-compat at install
+time, typically with a `reduceDependency` plugin combined with
+`nodeLinker: node-modules` so the patched entries are never needed. See
+chainguard-dev/ecosystems-rebuilder.js#1188 for one such bypass. The skip is
+the right call for the locksmith test harness (which compares byte-identical
+output against a stock yarn) but isn't a blocker for production rebuilds that
+control their install configuration.
 
 ## Skipped for yarn@3.1 correctness
 
