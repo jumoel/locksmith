@@ -30,6 +30,10 @@ type Node struct {
 	Engines          map[string]string
 	OS               []string
 	CPU              []string
+	// Libc lists the C-library variants the package supports (e.g., "glibc",
+	// "musl"). Empty means "any libc" (the common case). Populated from npm
+	// package metadata's `libc` field when present (pnpm and yarn berry honor it).
+	Libc []string
 	Bin              map[string]string
 	License          string
 	Deprecated       string

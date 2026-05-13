@@ -64,6 +64,12 @@ type GenerateOptions struct {
 	// CutoffDate, if set, restricts resolution to versions published before this time.
 	CutoffDate *time.Time
 
+	// CutoffExcludes lists package names that bypass CutoffDate. Sourced
+	// from `pnpm-workspace.yaml minimumReleaseAgeExclude` and
+	// `bunfig.toml install.minimumReleaseAgeExcludes`. Exact-name match
+	// only per ticket #28.
+	CutoffExcludes []string
+
 	// RegistryURL overrides the default registry for the ecosystem.
 	RegistryURL string
 
@@ -72,10 +78,18 @@ type GenerateOptions struct {
 	// Packages matching a scope use the scope-specific registry instead of RegistryURL.
 	ScopeRegistries map[string]string
 
-	// AuthTokens maps registry base URLs to Bearer tokens.
-	// Key must match the registry URL exactly (including trailing slash if present).
-	// The token is sent as an Authorization: Bearer header.
-	AuthTokens map[string]string
+	// AuthCredentials maps a normalized registry URL to a Credential.
+	// The credential's AuthHeader value is set on Authorization for each
+	// request to that registry. Keys MUST be normalized via
+	// internal/registryurl.Normalize; the registry client normalizes its
+	// own per-request URLs the same way before lookup.
+	//
+	// Supported credential types: ecosystem.BearerCredential (most common,
+	// e.g. .npmrc _authToken / yarnrc.yml npmAuthToken / bunfig.toml token)
+	// and ecosystem.BasicCredential (HTTP Basic, e.g. .npmrc _auth /
+	// username+_password / yarnrc.yml npmAuthIdent / bunfig.toml
+	// username+password). Client cert auth is not yet supported.
+	AuthCredentials map[string]ecosystem.Credential
 
 	// PolicyOverride, if set, overrides the default ResolverPolicy for the
 	// chosen format. Use this to match the behavior of a specific package
@@ -84,7 +98,23 @@ type GenerateOptions struct {
 
 	// Platform, if set, filters out packages whose OS/CPU restrictions
 	// are incompatible with the target platform. Format: "os/cpu" (e.g., "linux/x64").
+	//
+	// Deprecated: prefer SupportedArchitectures, which carries the same
+	// information plus a libc axis and supports multi-arch lockfiles.
+	// Platform is honored when SupportedArchitectures is the zero value;
+	// otherwise SupportedArchitectures wins. The two fields are kept in
+	// sync by the CLI's flag-handling code.
 	Platform string
+
+	// SupportedArchitectures filters out packages whose OS/CPU/Libc
+	// restrictions don't intersect the configured axes. Sourced from
+	// `.yarnrc.yml supportedArchitectures` and `pnpm-workspace.yaml
+	// supportedArchitectures` per ticket #13.
+	//
+	// Zero value means "no filtering" (every node passes). The
+	// `--platform os/cpu` CLI shorthand populates this with a single-entry
+	// list per axis; richer multi-arch use comes from config files.
+	SupportedArchitectures ecosystem.Architectures
 
 	// SpecDir is the directory containing the spec file on disk. Used to
 	// resolve file: dependencies by reading the local package's version.
@@ -99,8 +129,13 @@ type GenerateOptions struct {
 	// NodeVersion, if set, skips package versions whose engines.node
 	// constraint is incompatible with this Node.js version during resolution.
 	// Format: semver string (e.g., "18.0.0"). When all candidate versions
-	// are incompatible, the best version is used regardless (matches npm behavior).
+	// are incompatible, behavior depends on EngineStrict.
 	NodeVersion string
+
+	// EngineStrict, when true, makes "no version compatible with NodeVersion"
+	// a hard resolution error rather than falling back to the best-available
+	// version. Sourced from .npmrc `engine-strict=true` per ticket #15.
+	EngineStrict bool
 
 	// Catalogs provides pnpm catalog definitions. Maps catalog name ("default"
 	// for the unnamed catalog:) to package name -> version constraint.
@@ -117,4 +152,24 @@ type GenerateOptions struct {
 	// this value (see yarn.YarnBerryV8Formatter for the mapping). Required to
 	// match `cacheKey` exactly under `yarn install --immutable`.
 	YarnCompressionLevel string
+
+	// TLSOptions controls TLS validation and certificate trust for registry
+	// requests. Nil means default (system roots, strict validation).
+	// Sourced from .npmrc ca/cafile/strict-ssl per ticket #17.
+	TLSOptions *ecosystem.TLSOptions
+
+	// OmitLockfileRegistryResolved suppresses the `resolved` field on
+	// registry-tarball entries in npm package-lock output. Sourced from
+	// `.npmrc omit-lockfile-registry-resolved=true`. file: and workspace
+	// symlinks keep their resolved value (npm needs the path).
+	// Currently honored by FormatPackageLockV3 only; V1/V2 follow-up tracked
+	// separately.
+	OmitLockfileRegistryResolved bool
+
+	// MinifyPackageLock disables pretty-printing in npm package-lock output,
+	// matching `.npmrc format-package-lock=false`. Default (zero value) is
+	// pretty-print, matching npm's `format-package-lock=true` default.
+	// Currently honored by FormatPackageLockV3 only; V1/V2 follow-up tracked
+	// separately.
+	MinifyPackageLock bool
 }

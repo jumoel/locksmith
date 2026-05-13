@@ -1,0 +1,39 @@
+# Fixture shape modeled after yarn berry v4 documentation:
+# https://yarnpkg.com/configuration/yarnrc
+# Auth values redacted.
+npmRegistryServer: "https://registry.yarnpkg.com"
+
+npmScopes:
+  company:
+    npmRegistryServer: "https://npm.company.com"
+    npmAuthToken: "${COMPANY_NPM_TOKEN}"
+    npmAlwaysAuth: true
+  private:
+    npmRegistryServer: "https://npm.private.example/path"
+    npmAuthIdent: "user:pass-cleartext"
+
+npmRegistries:
+  "//npm.private.example/path":
+    npmAuthToken: "host-keyed-token"
+    npmAlwaysAuth: false
+
+compressionLevel: mixed
+defaultProtocol: "npm:"
+enableImmutableInstalls: false
+
+supportedArchitectures:
+  os:
+    - linux
+    - darwin
+  cpu:
+    - x64
+    - arm64
+  libc:
+    - glibc
+
+packageExtensions:
+  "react@*":
+    peerDependencies:
+      "react-dom": "*"
+
+httpsCaFilePath: "testdata/ca.pem"

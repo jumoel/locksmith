@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jumoel/locksmith"
+	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/registryurl"
 	"github.com/jumoel/locksmith/internal/yarnrc"
 	"github.com/spf13/cobra"
 )
@@ -44,10 +46,15 @@ func generateCmd() *cobra.Command {
 		nodeVersion          string
 		scopeRegistries      []string
 		authTokens           []string
+		authBasic            []string
+		authBasicEncoded     []string
 		timeoutDuration      time.Duration
 		verbose              bool
 		yarnrcPath           string
 		yarnCompressionLevel string
+		noUserConfig         bool
+		noProjectConfig      bool
+		printConfig          bool
 	)
 
 	cmd := &cobra.Command{
@@ -72,11 +79,14 @@ func generateCmd() *cobra.Command {
 				return fmt.Errorf("discovering workspace members: %w", err)
 			}
 
-			// Auto-discover pnpm catalogs from pnpm-workspace.yaml.
-			catalogs, err := discoverPnpmCatalogs(specPath)
+			// Auto-discover pnpm-workspace.yaml (catalogs, workspace globs,
+			// and the slice-2 settings). The same file feeds multiple
+			// places; we read it once here.
+			pnpmConfig, err := loadPnpmConfig(specPath)
 			if err != nil {
-				return fmt.Errorf("discovering pnpm catalogs: %w", err)
+				return fmt.Errorf("loading pnpm-workspace.yaml: %w", err)
 			}
+			catalogs := pnpmConfig.Catalogs
 
 			// Parse scope registries.
 			scopeRegs, err := parseKeyValuePairs(scopeRegistries, "scope-registry")
@@ -84,10 +94,88 @@ func generateCmd() *cobra.Command {
 				return err
 			}
 
-			// Parse auth tokens.
+			// Parse auth tokens / basic credentials from CLI flags.
 			authToks, err := parseKeyValuePairs(authTokens, "auth-token")
 			if err != nil {
 				return err
+			}
+			authBasicPlain, err := parseKeyValuePairs(authBasic, "auth-basic")
+			if err != nil {
+				return err
+			}
+			authBasicEnc, err := parseKeyValuePairs(authBasicEncoded, "auth-basic-encoded")
+			if err != nil {
+				return err
+			}
+			cliCreds := credentialsFromCLIFlags(authToks, authBasicPlain, authBasicEnc)
+
+			// Discover and parse config files. Each ecosystem reads only what
+			// its real PM reads (per ticket #4). Yarn berry skips .npmrc;
+			// yarn classic walks the dir tree.
+			projectDir := filepath.Dir(specPath)
+			userHome := ""
+			if home, _ := os.UserHomeDir(); home != "" {
+				userHome = home
+			}
+
+			var rcOpts *npmrcOptions = &npmrcOptions{
+				ScopeRegistries: map[string]string{},
+				AuthCredentials: map[string]ecosystem.Credential{},
+			}
+			// .npmrc is read for: npm formats, pnpm formats (auth+registry only),
+			// bun (compat), yarn-classic. NOT for yarn-berry-* per ticket #4.
+			if !isYarnBerryFormat(outputFormat) {
+				projectRcPath := ""
+				if !noProjectConfig {
+					projectRcPath = filepath.Join(projectDir, ".npmrc")
+				}
+				userRcPath := ""
+				if !noUserConfig && userHome != "" {
+					userRcPath = filepath.Join(userHome, ".npmrc")
+				}
+				// Yarn classic walks up the dir tree (ticket #27).
+				if isYarnClassicFormat(outputFormat) {
+					rcOpts, err = loadNpmrcOptionsWalkUp(projectDir, userHome, noProjectConfig, noUserConfig)
+				} else {
+					rcOpts, err = loadNpmrcOptions(projectRcPath, userRcPath)
+				}
+				if err != nil {
+					return err
+				}
+			}
+
+			// .yarnrc.yml for yarn-berry formats only.
+			var yarnrcOpts *yarnrcContribution
+			if isYarnBerryFormat(outputFormat) {
+				projectYarnrc := ""
+				if !noProjectConfig {
+					projectYarnrc = filepath.Join(projectDir, ".yarnrc.yml")
+				}
+				userYarnrc := ""
+				if !noUserConfig && userHome != "" {
+					userYarnrc = filepath.Join(userHome, ".yarnrc.yml")
+				}
+				yarnrcOpts, err = loadYarnrc(projectYarnrc, userYarnrc)
+				if err != nil {
+					return err
+				}
+			}
+
+			// bunfig.toml for bun format only.
+			var bunfigOpts *bunfigContribution
+			if isBunFormat(outputFormat) {
+				projectBunfig := ""
+				if !noProjectConfig {
+					projectBunfig = filepath.Join(projectDir, "bunfig.toml")
+				}
+				userBunfig := ""
+				if !noUserConfig {
+					userBunfig = bunfigUserPath()
+				}
+				bunfigOpts, err = loadBunfig(projectBunfig, userBunfig)
+				if err != nil {
+					return err
+				}
 			}
 
 			// Resolve yarn compressionLevel. The explicit flag wins; otherwise
@@ -102,19 +190,41 @@ func generateCmd() *cobra.Command {
 				compressionLevel = cl
 			}
 
-			// Parse cutoff date
+			// Build GenerateOptions. Precedence (per ticket #18): CLI flag >
+			// project rc > user rc > format default. cobra's Changed accessor
+			// is the gate for "is this CLI flag set explicitly".
 			opts := locksmith.GenerateOptions{
-				SpecFile:             specData,
-				OutputFormat:         outputFormat,
-				RegistryURL:          registryURL,
-				ScopeRegistries:      scopeRegs,
-				AuthTokens:           authToks,
-				Platform:             platform,
-				SpecDir:              filepath.Dir(specPath),
-				WorkspaceMembers:     members,
-				NodeVersion:          nodeVersion,
-				Catalogs:             catalogs,
-				YarnCompressionLevel: compressionLevel,
+				SpecFile:                     specData,
+				OutputFormat:                 outputFormat,
+				RegistryURL:                  pickString(rcOpts.Registry, registryURL, cmd.Flags().Changed("registry")),
+				ScopeRegistries:              mergeScopeRegistries(rcOpts.ScopeRegistries, scopeRegs),
+				AuthCredentials:              mergeCredentials(rcOpts.AuthCredentials, cliCreds),
+				TLSOptions:                   rcOpts.TLSOptions,
+				Platform:                     platform,
+				SpecDir:                      filepath.Dir(specPath),
+				WorkspaceMembers:             members,
+				NodeVersion:                  nodeVersion,
+				Catalogs:                     catalogs,
+				YarnCompressionLevel:         compressionLevel,
+				OmitLockfileRegistryResolved: rcOpts.OmitLockfileRegistryResolved,
+				MinifyPackageLock:            rcOpts.MinifyPackageLock,
+			}
+			// Apply policy fields from rc.
+			if rcOpts.LegacyPeerDeps || rcOpts.StrictPeerDeps {
+				// Materialize a complete policy (per ticket #14): start from
+				// the resolver's format-default baseline, overlay rc.
+				policy := defaultPolicyForFormat(outputFormat)
+				if rcOpts.LegacyPeerDeps {
+					policy.LegacyPeerDeps = true
+				}
+				if rcOpts.StrictPeerDeps {
+					policy.StrictPeerDeps = true
+				}
+				opts.PolicyOverride = &policy
+			}
+			opts.EngineStrict = rcOpts.EngineStrict
+			if rcOpts.CutoffDate != nil {
+				opts.CutoffDate = rcOpts.CutoffDate
 			}
 			if cutoffStr != "" {
 				t, err := time.Parse(time.RFC3339, cutoffStr)
@@ -126,6 +236,28 @@ func generateCmd() *cobra.Command {
 					}
 				}
 				opts.CutoffDate = &t
+			}
+
+			// Apply pnpm-workspace.yaml contribution (slice 2). Only
+			// affects pnpm-* output formats.
+			if isPnpmFormat(outputFormat) {
+				applyPnpmConfigToOptions(&opts, pnpmConfig, time.Now())
+			}
+
+			// Apply .yarnrc.yml contribution (slice 3). Yarn-berry-* only.
+			if isYarnBerryFormat(outputFormat) {
+				applyYarnrcToOptions(&opts, yarnrcOpts)
+			}
+
+			// Apply bunfig.toml contribution (slice 5). Bun-lock only.
+			// Bunfig wins over .npmrc per ticket #23, so this lands after
+			// the npmrc application.
+			if isBunFormat(outputFormat) {
+				applyBunfigToOptions(&opts, bunfigOpts, time.Now())
+			}
+
+			if printConfig {
+				return emitPrintConfig(cmd.OutOrStdout(), &opts, rcOpts)
 			}
 
 			// Generate with optional timeout. The deadline gives the resolver
@@ -185,6 +317,11 @@ func generateCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "emit a heartbeat to stderr every 5s so long-running runs are observable")
 	cmd.Flags().StringVar(&yarnrcPath, "yarnrc-path", "", "path to .yarnrc.yml; locksmith reads compressionLevel from it to match yarn 4's cacheKey")
 	cmd.Flags().StringVar(&yarnCompressionLevel, "yarn-compression-level", "", "override yarn compressionLevel directly (e.g. mixed, 0, 9); takes precedence over --yarnrc-path")
+	cmd.Flags().StringArrayVar(&authBasic, "auth-basic", nil, "url=user:pass pairs for per-registry Basic auth (cleartext user/pass)")
+	cmd.Flags().StringArrayVar(&authBasicEncoded, "auth-basic-encoded", nil, "url=base64(user:pass) pairs for per-registry Basic auth, matching .npmrc _auth=")
+	cmd.Flags().BoolVar(&noUserConfig, "no-user-config", false, "skip reading user-level config files (~/.npmrc etc.); useful in CI for reproducibility")
+	cmd.Flags().BoolVar(&noProjectConfig, "no-project-config", false, "skip reading project-level config files next to the spec; useful to generate against an alternative config")
+	cmd.Flags().BoolVar(&printConfig, "print-config", false, "emit the merged effective config (post-precedence) as JSON and exit; credentials redacted")
 
 	_ = cmd.MarkFlagRequired("spec")
 	_ = cmd.MarkFlagRequired("format")
@@ -309,4 +446,18 @@ func parseKeyValuePairs(pairs []string, flagName string) (map[string]string, err
 		result[key] = value
 	}
 	return result, nil
+}
+
+// bearerCredentialsFromFlags converts the legacy --auth-token map (url=token)
+// into the AuthCredentials shape. Keys are normalized so they line up with
+// the registry client's per-request normalization.
+func bearerCredentialsFromFlags(tokens map[string]string) map[string]ecosystem.Credential {
+	if len(tokens) == 0 {
+		return nil
+	}
+	out := make(map[string]ecosystem.Credential, len(tokens))
+	for url, token := range tokens {
+		out[registryurl.Normalize(url)] = ecosystem.BearerCredential{Token: token}
+	}
+	return out
 }

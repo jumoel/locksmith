@@ -75,6 +75,24 @@ locksmith generate \
 
 Optional flags: `--cutoff 2025-01-01` (only resolve versions published before this date), `--registry https://registry.npmjs.org` (override registry URL), `--node-version 18.0.0` (skip versions incompatible with target Node.js), `--platform linux/x64` (filter platform-specific optional deps).
 
+### Config files
+
+Locksmith reads the same config files the real package manager would, so the lockfile it produces matches what `npm ci` / `pnpm install --frozen-lockfile` / `yarn install --immutable` / `bun install` would accept against the same project.
+
+Per target format, locksmith honors:
+
+| Target format | Config files read |
+|---|---|
+| `package-lock-*`, `npm-shrinkwrap` | project `.npmrc`, user `~/.npmrc` |
+| `pnpm-lock-*` | `.npmrc` (auth+registry) + `pnpm-workspace.yaml` + `package.json` `"pnpm"` |
+| `yarn-classic` | `.yarnrc` + `.npmrc`, walked up the directory tree |
+| `yarn-berry-*` | `.yarnrc.yml` only - yarn 4 ignores `.npmrc`, and so does locksmith |
+| `bun-lock` | `bunfig.toml` + `.npmrc`, with `bunfig.toml` winning on conflict |
+
+Honored settings include registry routing (`registry`, `@scope:registry`, yarn's `npmScopes`/`npmRegistries`, bun's `[install.scopes]`), authentication (Bearer tokens via `_authToken`/`npmAuthToken`, HTTP Basic via `_auth`/`npmAuthIdent`/`username`+`_password`), TLS trust (`cafile`, `strict-ssl`, host-scoped variants, yarn's `httpsCaFilePath`), time-based cutoffs (`before`, `minimumReleaseAge`), resolver policy (`legacy-peer-deps`, `engine-strict`), `packageExtensions`, multi-arch filtering (`supportedArchitectures` with os/cpu/libc axes), and the yarn-4 `compressionLevel` / `defaultProtocol` knobs.
+
+Run `locksmith generate --print-config <other flags>` to see the merged effective config (with credentials redacted) and which file each value came from. Use `--no-user-config` to skip `~/.npmrc` etc. in CI for reproducibility; use `--no-project-config` for one-off runs against an alternative config.
+
 ## Supported formats
 
 | Format | Flag | PM versions | Correctness | Acceptance | Notes |

@@ -14,7 +14,18 @@ import (
 // PackageLockV3Formatter produces package-lock.json lockfileVersion 3 output.
 // The same format is used for npm-shrinkwrap.json - the only difference is the
 // filename, which is the caller's concern.
-type PackageLockV3Formatter struct{}
+type PackageLockV3Formatter struct {
+	// OmitLockfileRegistryResolved suppresses the "resolved" URL on registry
+	// tarball entries. Sourced from `.npmrc omit-lockfile-registry-resolved=true`
+	// per ticket #25. File: and workspace: entries keep their "resolved" value
+	// because npm needs the path to follow the symlink.
+	OmitLockfileRegistryResolved bool
+
+	// MinifyPackageLock disables pretty-printing. Sourced from `.npmrc
+	// format-package-lock=false` per ticket #25 (negated: locksmith default
+	// is pretty, matching npm's `format-package-lock=true` default).
+	MinifyPackageLock bool
+}
 
 // NewPackageLockV3Formatter returns a new v3 formatter.
 func NewPackageLockV3Formatter() *PackageLockV3Formatter {
@@ -39,7 +50,11 @@ func (f *PackageLockV3Formatter) FormatFromResult(result *ResolveResult, project
 
 	// All placed packages.
 	for path, placed := range result.PlacedNodes {
-		packages[path] = buildPackageEntry(placed.Node, placedDepName(path))
+		entry := buildPackageEntry(placed.Node, placedDepName(path))
+		if f.OmitLockfileRegistryResolved {
+			entry = stripRegistryResolved(entry)
+		}
+		packages[path] = entry
 		// Workspace members need a directory entry with their full spec.
 		if placed.Node.WorkspacePath != "" {
 			wsEntry := orderedjson.Map{
@@ -103,13 +118,39 @@ func (f *PackageLockV3Formatter) FormatFromResult(result *ResolveResult, project
 
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
-	encoder.SetIndent("", "  ")
+	if !f.MinifyPackageLock {
+		encoder.SetIndent("", "  ")
+	}
 	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(lockfile); err != nil {
 		return nil, fmt.Errorf("encoding lockfile: %w", err)
 	}
 
 	return buf.Bytes(), nil
+}
+
+// stripRegistryResolved returns entry with its "resolved" key removed when
+// the value is a registry tarball URL (http(s) scheme). file: and workspace
+// symlinks keep their resolved entry because npm needs the path to follow
+// the link.
+func stripRegistryResolved(entry orderedjson.Map) orderedjson.Map {
+	for i, e := range entry {
+		if e.Key != "resolved" {
+			continue
+		}
+		s, ok := e.Value.(string)
+		if !ok {
+			return entry
+		}
+		if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
+			return entry
+		}
+		out := make(orderedjson.Map, 0, len(entry)-1)
+		out = append(out, entry[:i]...)
+		out = append(out, entry[i+1:]...)
+		return out
+	}
+	return entry
 }
 
 // buildRootEntry constructs the root package entry (key "") from the project spec.

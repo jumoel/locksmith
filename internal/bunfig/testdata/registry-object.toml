@@ -1,0 +1,3 @@
+# Fixture: install.registry as an object with embedded token.
+[install]
+registry = { url = "https://registry.npmjs.org/", token = "embedded-bearer" }

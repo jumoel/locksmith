@@ -47,17 +47,31 @@ func Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error
 	}
 }
 
-// applyPlatformFilter parses the platform string and filters the graph,
-// returning the set of removed keys. If no platform is set, it returns nil.
-func applyPlatformFilter(graph *ecosystem.Graph, platform string) (map[string]bool, error) {
-	if platform == "" {
-		return nil, nil
+// applyPlatformFilter resolves the effective Architectures from the
+// (deprecated) Platform string and the SupportedArchitectures field, then
+// filters the graph. Returns the set of removed keys, or nil when no
+// filtering applies.
+//
+// Precedence: SupportedArchitectures wins when non-zero; Platform is the
+// fallback for callers that haven't migrated.
+func applyPlatformFilter(graph *ecosystem.Graph, opts GenerateOptions) (map[string]bool, error) {
+	archs := opts.SupportedArchitectures
+	if isZeroArchitectures(archs) {
+		if opts.Platform == "" {
+			return nil, nil
+		}
+		plat, err := ecosystem.ParsePlatform(opts.Platform)
+		if err != nil {
+			return nil, err
+		}
+		archs = ecosystem.ArchitecturesFromPlatform(plat)
 	}
-	plat, err := ecosystem.ParsePlatform(platform)
-	if err != nil {
-		return nil, err
-	}
-	return ecosystem.FilterGraphByPlatform(graph, plat), nil
+	archs = ecosystem.ResolveCurrentSentinel(archs)
+	return ecosystem.FilterGraphByArchitectures(graph, archs), nil
+}
+
+func isZeroArchitectures(a ecosystem.Architectures) bool {
+	return len(a.OS) == 0 && len(a.CPU) == 0 && len(a.Libc) == 0
 }
 
 // unreachableKeys returns package keys that are not reachable from the graph
@@ -102,7 +116,7 @@ type npmFormatter interface {
 
 func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
-	registry := npm.NewRegistryClientWithConfig(opts.RegistryURL, opts.ScopeRegistries, opts.AuthTokens)
+	registry := npm.NewRegistryClientWithTLS(opts.RegistryURL, opts.ScopeRegistries, opts.AuthCredentials, opts.TLSOptions)
 	resolver := npm.NewResolver()
 	resolver.PolicyOverride = opts.PolicyOverride
 
@@ -113,7 +127,10 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 	case FormatPackageLockV2:
 		formatter = npm.NewPackageLockV2Formatter()
 	case FormatPackageLockV3:
-		formatter = npm.NewPackageLockV3Formatter()
+		v3 := npm.NewPackageLockV3Formatter()
+		v3.OmitLockfileRegistryResolved = opts.OmitLockfileRegistryResolved
+		v3.MinifyPackageLock = opts.MinifyPackageLock
+		formatter = v3
 	case FormatNpmShrinkwrap:
 		// npm-shrinkwrap.json uses v1 format for maximum backward compatibility.
 		// npm 1-6 only understand the v1 hierarchical dependencies format, and
@@ -150,7 +167,7 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		spec.Overrides = overrides
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, CutoffExcludes: opts.CutoffExcludes, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion, EngineStrict: opts.EngineStrict}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
 	}
@@ -159,7 +176,7 @@ func generateNpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
 	}
 
-	removed, err := applyPlatformFilter(result.Graph, opts.Platform)
+	removed, err := applyPlatformFilter(result.Graph, opts)
 	if err != nil {
 		return nil, fmt.Errorf("filtering by platform: %w", err)
 	}
@@ -207,7 +224,7 @@ type pnpmFormatter interface {
 
 func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
-	registry := npm.NewRegistryClientWithConfig(opts.RegistryURL, opts.ScopeRegistries, opts.AuthTokens)
+	registry := npm.NewRegistryClientWithTLS(opts.RegistryURL, opts.ScopeRegistries, opts.AuthCredentials, opts.TLSOptions)
 	resolver := pnpm.NewResolver()
 	resolver.PolicyOverride = opts.PolicyOverride
 
@@ -280,7 +297,7 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		spec.Catalogs = opts.Catalogs
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, CutoffExcludes: opts.CutoffExcludes, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion, EngineStrict: opts.EngineStrict}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
 	}
@@ -309,7 +326,7 @@ func generatePnpm(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		}
 	}
 
-	removed, err := applyPlatformFilter(result.Graph, opts.Platform)
+	removed, err := applyPlatformFilter(result.Graph, opts)
 	if err != nil {
 		return nil, fmt.Errorf("filtering by platform: %w", err)
 	}
@@ -341,7 +358,7 @@ type yarnFormatter interface {
 
 func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
-	registry := npm.NewRegistryClientWithConfig(opts.RegistryURL, opts.ScopeRegistries, opts.AuthTokens)
+	registry := npm.NewRegistryClientWithTLS(opts.RegistryURL, opts.ScopeRegistries, opts.AuthCredentials, opts.TLSOptions)
 
 	var resolver *yarn.Resolver
 	var formatter yarnFormatter
@@ -391,7 +408,7 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		spec.Overrides = overrides
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, CutoffExcludes: opts.CutoffExcludes, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion, EngineStrict: opts.EngineStrict}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
 	}
@@ -400,7 +417,7 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 		return nil, fmt.Errorf("resolving dependencies: %w", err)
 	}
 
-	removed, err := applyPlatformFilter(result.Graph, opts.Platform)
+	removed, err := applyPlatformFilter(result.Graph, opts)
 	if err != nil {
 		return nil, fmt.Errorf("filtering by platform: %w", err)
 	}
@@ -441,7 +458,7 @@ func generateYarn(ctx context.Context, opts GenerateOptions) (*GenerateResult, e
 
 func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
 	parser := npm.NewSpecParser()
-	registry := npm.NewRegistryClientWithConfig(opts.RegistryURL, opts.ScopeRegistries, opts.AuthTokens)
+	registry := npm.NewRegistryClientWithTLS(opts.RegistryURL, opts.ScopeRegistries, opts.AuthCredentials, opts.TLSOptions)
 	resolver := bun.NewResolver()
 	formatter := bun.NewBunLockFormatter()
 
@@ -474,7 +491,7 @@ func generateBun(ctx context.Context, opts GenerateOptions) (*GenerateResult, er
 		spec.Overrides = overrides
 	}
 
-	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion}
+	resolveOpts := ecosystem.ResolveOptions{CutoffDate: opts.CutoffDate, CutoffExcludes: opts.CutoffExcludes, SpecDir: opts.SpecDir, NodeVersion: opts.NodeVersion, EngineStrict: opts.EngineStrict}
 	if spec.Workspaces != nil {
 		resolveOpts.WorkspaceIndex = ecosystem.NewWorkspaceIndex(spec.Workspaces)
 	}

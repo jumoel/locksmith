@@ -1,0 +1,17 @@
+# Fixture shape modeled after bun.com/docs/runtime/bunfig.
+# Auth values redacted.
+
+[install]
+registry = "https://registry.npmjs.org"
+minimumReleaseAge = 86400
+minimumReleaseAgeExcludes = ["@types/bun"]
+optional = true
+dev = false
+peer = true
+production = false
+cafile = "testdata/ca.pem"
+
+[install.scopes]
+acme = "https://npm.acme.example/"
+private = { url = "https://npm.private.example/", token = "$ACME_TOKEN" }
+basicScope = { url = "https://npm.basic.example/", username = "user", password = "pass" }

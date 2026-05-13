@@ -10,6 +10,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/registryurl"
 )
 
 // newTestServer creates a mock npm registry serving the is-odd packument.
@@ -436,8 +439,8 @@ func TestAuthToken_SentWhenConfigured(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewRegistryClientWithConfig(srv.URL, nil, map[string]string{
-		srv.URL: "my-secret-token",
+	client := NewRegistryClientWithConfig(srv.URL, nil, map[string]ecosystem.Credential{
+		registryurl.Normalize(srv.URL): ecosystem.BearerCredential{Token: "my-secret-token"},
 	})
 	_, err := client.FetchVersions(context.Background(), "test-pkg", nil)
 	if err != nil {
@@ -446,6 +449,55 @@ func TestAuthToken_SentWhenConfigured(t *testing.T) {
 	want := "Bearer my-secret-token"
 	if gotAuth != want {
 		t.Errorf("Authorization header = %q, want %q", gotAuth, want)
+	}
+}
+
+func TestAuthBasic_SentWhenConfigured(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"name":"test-pkg","versions":{"1.0.0":{"name":"test-pkg","version":"1.0.0","dist":{"tarball":"http://x/t.tgz","shasum":"abc"}}},"time":{"1.0.0":"2020-01-01T00:00:00.000Z"},"dist-tags":{"latest":"1.0.0"}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewRegistryClientWithConfig(srv.URL, nil, map[string]ecosystem.Credential{
+		registryurl.Normalize(srv.URL): ecosystem.BasicCredential{Username: "foo", Password: "bar"},
+	})
+	_, err := client.FetchVersions(context.Background(), "test-pkg", nil)
+	if err != nil {
+		t.Fatalf("FetchVersions: %v", err)
+	}
+	// base64("foo:bar") == "Zm9vOmJhcg==".
+	want := "Basic Zm9vOmJhcg=="
+	if gotAuth != want {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, want)
+	}
+}
+
+// TestAuth_LookupNormalizes verifies that mismatched trailing slashes between
+// the auth map key and the registry URL don't break credential lookup. This
+// is the bug ticket #21 exists to prevent.
+func TestAuth_LookupNormalizes(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"name":"test-pkg","versions":{"1.0.0":{"name":"test-pkg","version":"1.0.0","dist":{"tarball":"http://x/t.tgz","shasum":"abc"}}},"time":{"1.0.0":"2020-01-01T00:00:00.000Z"},"dist-tags":{"latest":"1.0.0"}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	// Client baseURL has no trailing slash; auth map key has one. The
+	// normalization layer must collapse them.
+	client := NewRegistryClientWithConfig(srv.URL, nil, map[string]ecosystem.Credential{
+		registryurl.Normalize(srv.URL + "/"): ecosystem.BearerCredential{Token: "tok"},
+	})
+	_, err := client.FetchVersions(context.Background(), "test-pkg", nil)
+	if err != nil {
+		t.Fatalf("FetchVersions: %v", err)
+	}
+	if gotAuth != "Bearer tok" {
+		t.Errorf("Authorization header = %q, want %q (trailing-slash mismatch should not break lookup)", gotAuth, "Bearer tok")
 	}
 }
 
@@ -496,8 +548,8 @@ func TestScopeRouting_WithAuth(t *testing.T) {
 
 	client := NewRegistryClientWithConfig(publicSrv.URL, map[string]string{
 		"@company": privateSrv.URL,
-	}, map[string]string{
-		privateSrv.URL: "private-token",
+	}, map[string]ecosystem.Credential{
+		registryurl.Normalize(privateSrv.URL): ecosystem.BearerCredential{Token: "private-token"},
 	})
 
 	ctx := context.Background()
@@ -542,8 +594,8 @@ func TestNewRegistryClient_BackwardCompatible(t *testing.T) {
 	if client.scopeRegistries != nil {
 		t.Errorf("scopeRegistries = %v, want nil", client.scopeRegistries)
 	}
-	if client.authTokens != nil {
-		t.Errorf("authTokens = %v, want nil", client.authTokens)
+	if client.authCredentials != nil {
+		t.Errorf("authCredentials = %v, want nil", client.authCredentials)
 	}
 	if client.cache == nil {
 		t.Error("cache is nil, want initialized map")

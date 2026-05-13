@@ -155,7 +155,7 @@ func TestApplyPlatformFilter_EmptyPlatform(t *testing.T) {
 		Root:  &ecosystem.Node{Name: "root", Version: "0.0.0"},
 		Nodes: map[string]*ecosystem.Node{},
 	}
-	removed, err := applyPlatformFilter(g, "")
+	removed, err := applyPlatformFilter(g, GenerateOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestApplyPlatformFilter_InvalidPlatform(t *testing.T) {
 		Root:  &ecosystem.Node{Name: "root", Version: "0.0.0"},
 		Nodes: map[string]*ecosystem.Node{},
 	}
-	_, err := applyPlatformFilter(g, "invalid-no-slash")
+	_, err := applyPlatformFilter(g, GenerateOptions{Platform: "invalid-no-slash"})
 	if err == nil {
 		t.Fatal("expected error for invalid platform, got nil")
 	}
@@ -199,7 +199,7 @@ func TestApplyPlatformFilter_ValidPlatform(t *testing.T) {
 		},
 	}
 
-	removed, err := applyPlatformFilter(g, "linux/x64")
+	removed, err := applyPlatformFilter(g, GenerateOptions{Platform: "linux/x64"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

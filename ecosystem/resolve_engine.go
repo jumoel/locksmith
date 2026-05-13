@@ -62,6 +62,34 @@ type ResolverPolicy struct {
 	// auto-installation (pnpm 10+ behavior). Default false matches pnpm 10+.
 	IgnoreMissingPreventsInstall bool
 
+	// LegacyPeerDeps: when true, the resolver ignores peer dependencies
+	// entirely (no auto-install, no peer-metadata storage, no peer-conflict
+	// checks). Reproduces npm 6 behavior. Sourced from .npmrc `legacy-peer-deps=true`.
+	// When this is set, AutoInstallPeers and StorePeerMetaOnNode are
+	// effectively ignored.
+	LegacyPeerDeps bool
+
+	// StrictPeerDeps: when true, peer-dependency conflicts halt resolution
+	// with an error instead of being absorbed. Sourced from .npmrc
+	// `strict-peer-deps=true`. Has no effect when LegacyPeerDeps is set.
+	StrictPeerDeps bool
+
+	// ResolutionMode picks a non-default version-selection strategy.
+	// Sourced from `pnpm-workspace.yaml resolutionMode`. Values: "highest"
+	// (current default), "time-based" (pin transitives to the time direct
+	// deps were added), "lowest-direct" (oldest matching version for direct
+	// deps). Slice-2 parses and surfaces the value; behavior for
+	// time-based/lowest-direct is filed as a follow-up - the resolver
+	// currently treats anything other than "highest" as "use the existing
+	// VersionSelection setting."
+	ResolutionMode string
+
+	// DedupePeerDependents: when true, peer-dependent installs are shared
+	// across the graph (pnpm default). When false, each consumer gets its
+	// own copy. Sourced from `pnpm-workspace.yaml dedupePeerDependents`.
+	// Slice-2 parses the value; resolver-side wiring is filed as a follow-up.
+	DedupePeerDependents bool
+
 	// ResolveWorkspaceByName: when true and a workspace index is available,
 	// resolve regular semver constraints to workspace members if the dep name
 	// matches a member. This is npm and yarn classic behavior where cross-workspace
@@ -87,12 +115,17 @@ func (p *ResolverPolicy) ApplyOverride(override *ResolverPolicy) {
 	p.VersionSelection = override.VersionSelection
 	p.IgnoreMissingPreventsInstall = override.IgnoreMissingPreventsInstall
 	p.ResolveWorkspaceByName = override.ResolveWorkspaceByName
+	p.LegacyPeerDeps = override.LegacyPeerDeps
+	p.StrictPeerDeps = override.StrictPeerDeps
+	p.ResolutionMode = override.ResolutionMode
+	p.DedupePeerDependents = override.DedupePeerDependents
 }
 
 // resolverState holds state during resolution.
 type resolverState struct {
 	registry          Registry
 	cutoff            *time.Time
+	cutoffExcludes    map[string]bool // exact package names that bypass cutoff
 	ctx               context.Context
 	nodes             map[string]*Node // "name@version" -> node
 	nodeIndex         *NodeIndex       // O(1) name lookups
@@ -108,6 +141,7 @@ type resolverState struct {
 	patchedDeps       map[string]string            // pnpm patchedDependencies
 	ancestry          []string                     // current resolution chain for override matching
 	nodeVersion       *semver.Version              // target Node.js version for engines filtering
+	engineStrict      bool                         // when true, no-compatible-version is an error
 	prefetcher        *prefetcher                  // speculative packument warmer; nil when disabled
 }
 
@@ -128,9 +162,14 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 		}
 	}
 
+	cutoffExcludes := map[string]bool{}
+	for _, name := range opts.CutoffExcludes {
+		cutoffExcludes[name] = true
+	}
 	state := &resolverState{
 		registry:          registry,
 		cutoff:            opts.CutoffDate,
+		cutoffExcludes:    cutoffExcludes,
 		ctx:               ctx,
 		nodes:             make(map[string]*Node),
 		nodeIndex:         NewNodeIndex(),
@@ -145,6 +184,7 @@ func Resolve(ctx context.Context, project *ProjectSpec, registry Registry, opts 
 		catalogs:          project.Catalogs,
 		patchedDeps:       project.PatchedDependencies,
 		nodeVersion:       nodeVer,
+		engineStrict:      opts.EngineStrict,
 		prefetcher:        newPrefetcher(ctx, registry, opts.CutoffDate, PrefetchWorkers, 0),
 	}
 	defer state.prefetcher.Wait()
@@ -389,7 +429,13 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		return nil, "", fmt.Errorf("parsing constraint %q: %w", actualConstraint, err)
 	}
 
-	versions, err := s.registry.FetchVersions(s.ctx, actualName, s.cutoff)
+	// CutoffExcludes (ticket #11): packages whose names appear here bypass
+	// the cutoff filter (typically @types/* in pnpm/bun configs).
+	effectiveCutoff := s.cutoff
+	if effectiveCutoff != nil && s.cutoffExcludes[actualName] {
+		effectiveCutoff = nil
+	}
+	versions, err := s.registry.FetchVersions(s.ctx, actualName, effectiveCutoff)
 	if err != nil {
 		return nil, "", fmt.Errorf("fetching versions for %s: %w", actualName, err)
 	}
@@ -472,8 +518,12 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 				return nil, "", fmt.Errorf("fetching metadata for %s@%s: %w", actualName, version, err)
 			}
 		}
-		// If fallback is nil, all versions are incompatible. Keep the original
-		// best version (npm advisory behavior).
+		// If fallback is nil, all versions are incompatible. With engine-strict
+		// this is a hard failure; without it, keep the original best version
+		// (npm advisory behavior).
+		if fallback == nil && s.engineStrict {
+			return nil, "", fmt.Errorf("engine-strict: no version of %s is compatible with node %s", actualName, s.nodeVersion)
+		}
 	}
 
 	// Apply packageExtensions to inject additional deps before building the node.
@@ -495,7 +545,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 				batch = append(batch, name)
 			}
 		}
-		if s.policy.AutoInstallPeers {
+		if s.policy.AutoInstallPeers && !s.policy.LegacyPeerDeps {
 			for name, constraint := range meta.PeerDeps {
 				if !isNonRegistrySpecifier(constraint) {
 					batch = append(batch, name)
@@ -525,7 +575,7 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		node.BundleDeps = meta.BundleDeps
 	}
 
-	if s.policy.StorePeerMetaOnNode {
+	if s.policy.StorePeerMetaOnNode && !s.policy.LegacyPeerDeps {
 		node.PeerDeps = meta.PeerDeps
 		node.PeerDepsMeta = meta.PeerDepsMeta
 	}
@@ -593,8 +643,8 @@ func (s *resolverState) resolveDep(graph *Graph, name, constraint string, depTyp
 		})
 	}
 
-	// Auto-install peer deps if enabled.
-	if s.policy.AutoInstallPeers {
+	// Auto-install peer deps if enabled and legacy mode is off.
+	if s.policy.AutoInstallPeers && !s.policy.LegacyPeerDeps {
 		// Build edge name set once for O(1) lookups.
 		resolvedEdgeNames := make(map[string]bool, len(node.Dependencies))
 		for _, edge := range node.Dependencies {

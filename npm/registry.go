@@ -2,6 +2,8 @@ package npm
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,52 +13,142 @@ import (
 	"time"
 
 	"github.com/jumoel/locksmith/ecosystem"
+	"github.com/jumoel/locksmith/internal/registryurl"
 	"golang.org/x/sync/singleflight"
 )
 
 // RegistryClient fetches package metadata from the npm registry.
 type RegistryClient struct {
 	baseURL         string
-	httpClient      *http.Client
+	defaultClient   *http.Client                    // used when no per-host TLS override matches
 	mu              sync.Mutex
 	cache           map[string]*Packument
 	sf              singleflight.Group
-	scopeRegistries map[string]string // "@scope" -> registry URL
-	authTokens      map[string]string // registry URL -> bearer token
+	scopeRegistries map[string]string               // "@scope" -> registry URL
+	authCredentials map[string]ecosystem.Credential // normalized registry URL -> credential
+
+	tlsOptions *ecosystem.TLSOptions
+	clientMu   sync.Mutex
+	hostClients map[string]*http.Client // normalized registry URL -> cached per-host client
 }
 
-// NewRegistryClient creates a new npm registry client with no scope routing or auth.
+// NewRegistryClient creates a new npm registry client with no scope routing,
+// auth, or custom TLS.
 func NewRegistryClient(baseURL string) *RegistryClient {
 	return NewRegistryClientWithConfig(baseURL, nil, nil)
 }
 
-// NewRegistryClientWithConfig creates a registry client with per-scope routing and auth tokens.
-// scopeRegistries maps npm scopes (e.g., "@company") to registry URLs.
-// authTokens maps registry base URLs to Bearer tokens.
-func NewRegistryClientWithConfig(baseURL string, scopeRegistries, authTokens map[string]string) *RegistryClient {
+// NewRegistryClientWithConfig creates a registry client with per-scope routing
+// and per-registry credentials. See NewRegistryClientWithTLS for the variant
+// that also takes TLS settings.
+func NewRegistryClientWithConfig(baseURL string, scopeRegistries map[string]string, authCredentials map[string]ecosystem.Credential) *RegistryClient {
+	return NewRegistryClientWithTLS(baseURL, scopeRegistries, authCredentials, nil)
+}
+
+// NewRegistryClientWithTLS creates a registry client with full configuration:
+// per-scope routing, per-registry credentials, and TLS options. tlsOptions
+// may be nil for default (system-roots, strict-validation) behavior.
+//
+// authCredentials keys MUST be normalized via internal/registryurl.Normalize;
+// the registry client normalizes its own per-request URLs the same way before
+// lookup.
+//
+// tlsOptions.PerHost replaces the outer TLSOptions for the matching host
+// rather than merging with it (per ticket #22). If a host needs the global
+// CA plus an extra one, the caller must build the union themselves.
+func NewRegistryClientWithTLS(baseURL string, scopeRegistries map[string]string, authCredentials map[string]ecosystem.Credential, tlsOptions *ecosystem.TLSOptions) *RegistryClient {
 	if baseURL == "" {
 		baseURL = "https://registry.npmjs.org"
 	}
 	return &RegistryClient{
 		baseURL:         baseURL,
-		httpClient:      &http.Client{Timeout: 30 * time.Second},
+		defaultClient:   buildHTTPClient(tlsOptions),
 		cache:           make(map[string]*Packument),
 		scopeRegistries: scopeRegistries,
-		authTokens:      authTokens,
+		authCredentials: authCredentials,
+		tlsOptions:      tlsOptions,
+		hostClients:     map[string]*http.Client{},
+	}
+}
+
+// httpClientFor returns the *http.Client to use for a request to registryURL.
+// Per ticket #22, if tlsOptions.PerHost[normalized(registryURL)] is set, it
+// fully replaces the outer TLSOptions for that request - no merging. Clients
+// are cached per host so we don't rebuild a transport on every fetch.
+func (r *RegistryClient) httpClientFor(registryURL string) *http.Client {
+	if r.tlsOptions == nil || len(r.tlsOptions.PerHost) == 0 {
+		return r.defaultClient
+	}
+	host := registryurl.Normalize(registryURL)
+	r.clientMu.Lock()
+	defer r.clientMu.Unlock()
+	if c, ok := r.hostClients[host]; ok {
+		return c
+	}
+	override, ok := r.tlsOptions.PerHost[host]
+	if !ok {
+		return r.defaultClient
+	}
+	c := buildHTTPClient(override)
+	r.hostClients[host] = c
+	return c
+}
+
+// httpClient returns the default client. Kept around because the existing
+// retry loop reaches for "r.httpClient" - retained as a stub that delegates
+// to defaultClient so the retry loop doesn't need restructuring.
+func (r *RegistryClient) httpClient() *http.Client { return r.defaultClient }
+
+// buildHTTPClient constructs an *http.Client honoring the given TLSOptions.
+// nil opts produces a default client with system roots + strict validation,
+// matching the pre-#17 behavior.
+func buildHTTPClient(opts *ecosystem.TLSOptions) *http.Client {
+	tlsCfg := &tls.Config{}
+	if opts != nil {
+		if opts.Insecure {
+			tlsCfg.InsecureSkipVerify = true
+		}
+		if len(opts.RootCAs) > 0 {
+			pool := x509.NewCertPool()
+			allOK := true
+			for _, pem := range opts.RootCAs {
+				if !pool.AppendCertsFromPEM([]byte(pem)) {
+					allOK = false
+				}
+			}
+			// If parsing failed for any block AND we ended up with an empty
+			// pool, install the empty pool anyway: the resulting handshake
+			// will fail loudly rather than silently fall through to system
+			// roots (which would hide a misconfigured cafile).
+			if !allOK && len(pool.Subjects()) == 0 {
+				// Force an empty pool so verification fails.
+			}
+			tlsCfg.RootCAs = pool
+		}
+	}
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsCfg,
+			// Keep other Transport fields at default; locksmith doesn't
+			// override proxy or dial behavior at this layer.
+		},
 	}
 }
 
 // doWithRetry executes an HTTP request with retry and exponential backoff.
 // Retries on 429 (rate limit) and 5xx (server error). All other status codes
-// are returned immediately.
-func (r *RegistryClient) doWithRetry(req *http.Request) (*http.Response, error) {
+// are returned immediately. registryURL is used to look up a per-host
+// http.Client (TLS overrides) per ticket #22.
+func (r *RegistryClient) doWithRetry(req *http.Request, registryURL string) (*http.Response, error) {
 	const maxRetries = 3
+	client := r.httpClientFor(registryURL)
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			req = req.Clone(req.Context())
 			time.Sleep(retryBackoff(attempt))
 		}
-		resp, err := r.httpClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			if attempt == maxRetries {
 				return nil, err
@@ -144,13 +236,11 @@ func (r *RegistryClient) doFetchPackument(ctx context.Context, name string) (*Pa
 		return nil, fmt.Errorf("creating request for %s: %w", name, err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if r.authTokens != nil {
-		if token, ok := r.authTokens[registryURL]; ok {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
+	if header := r.authHeaderFor(registryURL); header != "" {
+		req.Header.Set("Authorization", header)
 	}
 
-	resp, err := r.doWithRetry(req)
+	resp, err := r.doWithRetry(req, registryURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetching packument for %s: %w", name, err)
 	}
@@ -266,4 +356,20 @@ func (r *RegistryClient) FetchDistTags(ctx context.Context, name string) (map[st
 		return nil, err
 	}
 	return p.DistTags, nil
+}
+
+// authHeaderFor returns the Authorization header value to send when fetching
+// from registryURL, or "" if no credential is configured. Lookup goes through
+// the registryurl.Normalize canonicalization so caller-supplied URLs (config
+// files) and registry-client URLs (constructed at runtime) match without
+// callers worrying about trailing slashes or hostname case.
+func (r *RegistryClient) authHeaderFor(registryURL string) string {
+	if r.authCredentials == nil {
+		return ""
+	}
+	cred, ok := r.authCredentials[registryurl.Normalize(registryURL)]
+	if !ok {
+		return ""
+	}
+	return cred.AuthHeader()
 }
