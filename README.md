@@ -7,7 +7,7 @@
 <p align="center">A Go library that generates valid lockfiles from package spec files. Given a <code>package.json</code>, locksmith resolves all dependencies against the npm registry and produces a lockfile that the target package manager accepts without modification.</p>
 
 > [!WARNING]
-> A simpler (and more stable) solution is to put a verdaccio [`verdaccio`](https://github.com/verdaccio/verdaccio) in front, use that to timegate dependencies and then use the package managers themselves to generate the lockfiles. Not as generic, and also slower, but more correct if you actually need this for any production workloads.
+> A simpler (and more stable) solution is to put a [`verdaccio`](https://github.com/verdaccio/verdaccio) in front, use that to timegate dependencies and then use the package managers themselves to generate the lockfiles. Not as generic, and also slower, but more correct if you actually need this for any production workloads.
 
 ## Install
 
